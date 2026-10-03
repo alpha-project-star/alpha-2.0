@@ -1,0 +1,690 @@
+import { DuckDuckGoProvider } from "./search-providers";
+import { SearchResult, SearchProvider } from "./web-search";
+import { activity } from "./activity";
+import { extractRelevantEvidence, extractArticleLinks } from "./research-utils";
+import { rankResults, scoreCandidateLink } from "./research-ranking";
+
+export interface WebToolReceipt {
+  toolSelected: boolean;
+  querySent: string | null;
+  status: "usable" | "empty" | "error" | "not_attempted";
+  resultCount: number;
+  openedCount: number;
+  errorClass:
+    | null
+    | "permission_denied"
+    | "provider_unavailable"
+    | "transport_error"
+    | "malformed_response"
+    | "unknown";
+}
+
+export interface NewsArticle {
+  headline: string;
+  publisher: string;
+  url: string;
+  publishedDate?: string;
+  summary: string;
+}
+
+export interface CanonicalWebSource {
+  id: number;
+  url: string;
+  title: string;
+  publisher?: string;
+  publishedDate?: string;
+  summary?: string;
+  isStructuredArticle?: boolean;
+}
+
+export interface ResearchResult {
+  query: string;
+  results: SearchResult[];
+  articles: NewsArticle[];
+  evidence: {
+    url: string;
+    title: string;
+    excerpt: string;
+    status: string;
+    publisher?: string;
+    publishedDate?: string;
+    retrievedAt: string;
+    rawContent?: string;
+  }[];
+  sources: CanonicalWebSource[];
+  status: "success" | "insufficient" | "failed";
+  receipt: WebToolReceipt;
+}
+
+export function normalizeSourceUrl(rawUrl: string): string {
+  if (!rawUrl) return "";
+  try {
+    const u = new URL(rawUrl.trim());
+    const trackingParams = new Set([
+      "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+      "fbclid", "gclid", "ref", "ref_src", "source"
+    ]);
+    const searchParams = new URLSearchParams(u.search);
+    for (const p of [...searchParams.keys()]) {
+      if (trackingParams.has(p.toLowerCase()) || p.toLowerCase().startsWith("utm_")) {
+        searchParams.delete(p);
+      }
+    }
+    const cleanSearch = searchParams.toString() ? `?${searchParams.toString()}` : "";
+    let pathname = u.pathname.replace(/\/+$/, "");
+    if (!pathname) pathname = "/";
+    return `${u.protocol}//${u.host.toLowerCase()}${pathname}${cleanSearch}`;
+  } catch {
+    return rawUrl.trim().toLowerCase().replace(/\/+$/, "");
+  }
+}
+
+export function buildCanonicalSources(
+  results: SearchResult[] = [],
+  articles: NewsArticle[] = [],
+  evidence: ResearchResult["evidence"] = [],
+): CanonicalWebSource[] {
+  const urlMap = new Map<string, CanonicalWebSource>();
+  const canonicalSources: CanonicalWebSource[] = [];
+
+  const registerOrUpdate = (
+    url: string,
+    title: string,
+    publisher?: string,
+    publishedDate?: string,
+    summary?: string,
+    isStructuredArticle?: boolean,
+  ): CanonicalWebSource => {
+    const cleanUrl = (url || "").trim();
+    if (!cleanUrl) {
+      const fallback: CanonicalWebSource = {
+        id: canonicalSources.length + 1,
+        url: cleanUrl,
+        title: title || "Web Source",
+        publisher,
+        publishedDate,
+        summary,
+        isStructuredArticle: Boolean(isStructuredArticle),
+      };
+      canonicalSources.push(fallback);
+      return fallback;
+    }
+
+    const norm = normalizeSourceUrl(cleanUrl);
+    const existing = urlMap.get(norm);
+    if (existing) {
+      if (!existing.publisher && publisher) existing.publisher = publisher;
+      if (!existing.publishedDate && publishedDate) existing.publishedDate = publishedDate;
+      if (!existing.summary && summary) existing.summary = summary;
+      if (isStructuredArticle) {
+        existing.isStructuredArticle = true;
+        if (title && title.length > 5) existing.title = title;
+      }
+      return existing;
+    }
+
+    const newSource: CanonicalWebSource = {
+      id: canonicalSources.length + 1,
+      url: cleanUrl,
+      title: (title || "").trim() || "Web Source",
+      publisher: publisher?.trim(),
+      publishedDate: publishedDate?.trim(),
+      summary: summary?.trim(),
+      isStructuredArticle: Boolean(isStructuredArticle),
+    };
+
+    urlMap.set(norm, newSource);
+    canonicalSources.push(newSource);
+    return newSource;
+  };
+
+  // 1. Structured articles (high-fidelity extracted articles/headlines)
+  for (const a of articles) {
+    if (a && a.url) {
+      registerOrUpdate(
+        a.url,
+        a.headline,
+        a.publisher,
+        a.publishedDate,
+        a.summary,
+        true,
+      );
+    }
+  }
+
+  // 2. Ranked search engine results
+  for (const r of results) {
+    if (r && r.url) {
+      registerOrUpdate(
+        r.url,
+        r.title,
+        r.source,
+        r.date,
+        r.snippet,
+        false,
+      );
+    }
+  }
+
+  // 3. Deep-read page evidence
+  for (const e of evidence) {
+    if (e && e.url) {
+      registerOrUpdate(
+        e.url,
+        e.title,
+        e.publisher,
+        e.publishedDate,
+        e.excerpt,
+        false,
+      );
+    }
+  }
+
+  return canonicalSources;
+}
+
+export function isHomepageOrPortalUrl(urlStr: string): boolean {
+  try {
+    const u = new URL(urlStr);
+    const path = u.pathname.replace(/\/+$/, "").toLowerCase();
+    if (!path || path === "" || path === "/" || path === "/index.html" || path === "/index.php" || path === "/home" || path === "/homepage" || path === "/frontpage") {
+      return true;
+    }
+    const genericSections = new Set([
+      "/news", "/world", "/us", "/uk", "/politics", "/business",
+      "/tech", "/technology", "/sport", "/sports", "/opinion", "/entertainment",
+      "/lifestyle", "/science", "/health", "/culture", "/features", "/markets",
+      "/economy", "/finance", "/money", "/travel", "/weather", "/live", "/video",
+      "/videos", "/podcasts", "/latest", "/breaking", "/top-stories", "/all",
+      "/headlines", "/front", "/front-page", "/search", "/feed", "/rss"
+    ]);
+    if (genericSections.has(path)) {
+      return true;
+    }
+
+    // Check category, section, topic, tag, author, feed patterns
+    if (/^\/(?:category|categories|section|sections|topic|topics|tag|tags|author|authors|by|feed|rss|search)\/[^/]+$/i.test(path)) {
+      return true;
+    }
+    if (/^\/(?:news|world|us|uk|politics|business|tech|technology|sport|sports|opinion)\/(?:all|latest|headlines|index|feed)?$/i.test(path)) {
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+export function isGenericPortalHeadline(headline: string, publisher?: string): boolean {
+  const normHead = (headline || "").trim().toLowerCase();
+  const normPub = (publisher || "").trim().toLowerCase();
+
+  if (!normHead || normHead.length < 15) {
+    return true;
+  }
+
+  const knownPublishers = [
+    "bbc", "bbc news", "reuters", "cnn", "associated press", "ap news", "ap",
+    "the guardian", "the new york times", "new york times", "nytimes",
+    "the washington post", "washington post", "wall street journal", "wsj",
+    "bloomberg", "fox news", "nbc news", "abc news", "cbs news", "npr",
+    "al jazeera", "usa today", "time", "newsweek", "forbes", "cnbc",
+    "the times", "the telegraph", "the independent", "sky news", "financial times", "ft",
+    "google news", "yahoo news", "msn news", "bing news", "duckduckgo", "web source"
+  ];
+
+  for (const pub of knownPublishers) {
+    if (normHead === pub || normHead === `${pub} - home` || normHead === `${pub} homepage` || normHead === `${pub} online`) {
+      return true;
+    }
+  }
+
+  if (normPub && (normHead === normPub || normHead === `${normPub} - home` || normHead === `${normPub} homepage`)) {
+    return true;
+  }
+
+  const genericHeadlineRegexes = [
+    /^(?:home|homepage|latest\s+news|top\s+stories|breaking\s+news|news\s+headlines|world\s+news|today's\s+news|daily\s+news|international\s+news|front\s+page)$/i,
+    /^(?:bbc\s+news|reuters|cnn|fox\s+news|ap\s+news|the\s+guardian|the\s+new\s+york\s+times|nytimes|the\s+washington\s+post|nbc\s+news|abc\s+news|cbs\s+news)\s*[-|–—:]\s*(?:breaking\s+news|world\s+news|latest\s+news|top\s+stories|news,\s*sport|videos?|home|international\s+news|us\s+news)/i,
+    /breaking\s+news,\s*latest\s+news\s+and\s+videos/i,
+    /breaking\s+international\s+news\s+&\s+views/i,
+    /latest\s+breaking\s+news,\s+headlines\s+&\s+top\s+stories/i,
+    /news,\s*sport\s+and\s+opinion\s+from\s+the\s+guardian/i,
+    /trusted\s+world\s+and\s+financial\s+news/i,
+    /read\s+the\s+latest\s+stories\s+from/i,
+  ];
+
+  for (const rgx of genericHeadlineRegexes) {
+    if (rgx.test(normHead)) return true;
+  }
+
+  return false;
+}
+
+export function hasArticleUrlStructure(urlStr: string): boolean {
+  try {
+    const u = new URL(urlStr);
+    const path = u.pathname.replace(/\/+$/, "");
+    if (!path || path === "" || isHomepageOrPortalUrl(urlStr)) return false;
+
+    // Date-based article path (e.g. /2026/03/21/..., /2026-03-21-...)
+    if (/\/(?:19|20)\d{2}[/-]\d{1,2}[/-]\d{1,2}/.test(path)) return true;
+
+    // Check path segments
+    const segments = path.split("/").filter(Boolean);
+    if (segments.length >= 1) {
+      const last = segments[segments.length - 1];
+      // Long slug with hyphens, numbers, or specific file extensions
+      if (last.length >= 15 && (last.includes("-") || last.includes("_") || /\d+/.test(last) || last.endsWith(".html") || last.endsWith(".story") || last.endsWith(".stm"))) {
+        return true;
+      }
+      if (segments.length >= 2 && last.length >= 8 && (last.includes("-") || last.includes("_") || /\d+/.test(last))) {
+        return true;
+      }
+      if (segments.length >= 3) {
+        return true;
+      }
+    }
+  } catch {}
+  return false;
+}
+
+export function isValidArticle(article: NewsArticle): boolean {
+  if (!article || !article.headline || !article.url) return false;
+  if (isHomepageOrPortalUrl(article.url)) return false;
+  if (isGenericPortalHeadline(article.headline, article.publisher)) return false;
+  
+  const words = article.headline.trim().split(/\s+/);
+  if (words.length < 4) return false;
+  if (article.headline.trim().length < 18) return false;
+
+  return true;
+}
+
+export function extractJsonLdArticle(content: string, pageUrl: string): Partial<NewsArticle> | null {
+  if (!content) return null;
+  const scriptRegex = /<script\s+[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = scriptRegex.exec(content)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      const items = Array.isArray(parsed) ? parsed : (parsed["@graph"] ? parsed["@graph"] : [parsed]);
+      for (const item of items) {
+        if (!item || typeof item !== "object") continue;
+        const type = String(item["@type"] || "");
+        if (/^(?:NewsArticle|Article|Report|TechArticle|AnalysisNewsArticle|ReviewNewsArticle|BackgroundNewsArticle|BlogPosting)$/i.test(type)) {
+          const headline = String(item.headline || item.name || "").trim();
+          const pubDate = String(item.datePublished || item.dateModified || "").trim();
+          let pubName = "";
+          if (typeof item.publisher === "string") {
+            pubName = item.publisher.trim();
+          } else if (item.publisher && typeof item.publisher === "object") {
+            pubName = String(item.publisher.name || "").trim();
+          }
+          const articleUrl = String(item.url || item.mainEntityOfPage || "").trim();
+          const desc = String(item.description || item.articleBody || "").trim();
+
+          if (headline && headline.length >= 15) {
+            return {
+              headline,
+              publisher: pubName || undefined,
+              publishedDate: pubDate || undefined,
+              url: articleUrl && articleUrl.startsWith("http") ? articleUrl : pageUrl,
+              summary: desc || undefined,
+            };
+          }
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
+export function extractOpenGraphArticle(content: string, pageUrl: string): Partial<NewsArticle> | null {
+  if (!content) return null;
+  
+  const ogTypeMatch = content.match(/<meta\s+[^>]*property=["']og:type["']\s+content=["']([^"']+)["']/i) ||
+                      content.match(/<meta\s+[^>]*content=["']([^"']+)["']\s+property=["']og:type["']/i);
+  const ogTitleMatch = content.match(/<meta\s+[^>]*property=["']og:title["']\s+content=["']([^"']+)["']/i) ||
+                       content.match(/<meta\s+[^>]*content=["']([^"']+)["']\s+property=["']og:title["']/i) ||
+                       content.match(/<meta\s+[^>]*name=["']twitter:title["']\s+content=["']([^"']+)["']/i);
+  const ogSiteMatch = content.match(/<meta\s+[^>]*property=["']og:site_name["']\s+content=["']([^"']+)["']/i) ||
+                      content.match(/<meta\s+[^>]*content=["']([^"']+)["']\s+property=["']og:site_name["']/i);
+  const ogPubDateMatch = content.match(/<meta\s+[^>]*property=["']article:published_time["']\s+content=["']([^"']+)["']/i) ||
+                         content.match(/<meta\s+[^>]*content=["']([^"']+)["']\s+property=["']article:published_time["']/i) ||
+                         content.match(/<meta\s+[^>]*name=["']pubdate["']\s+content=["']([^"']+)["']/i);
+  const ogDescMatch = content.match(/<meta\s+[^>]*property=["']og:description["']\s+content=["']([^"']+)["']/i) ||
+                      content.match(/<meta\s+[^>]*name=["']description["']\s+content=["']([^"']+)["']/i);
+
+  const jinaTitleMatch = content.match(/^Title:\s*(.*)$/im);
+  const jinaDateMatch = content.match(/^Published Time:\s*(.*)$/im);
+
+  const ogType = (ogTypeMatch ? ogTypeMatch[1] : "").toLowerCase();
+  const ogTitle = ogTitleMatch ? ogTitleMatch[1].trim() : (jinaTitleMatch ? jinaTitleMatch[1].trim() : "");
+  const ogSite = ogSiteMatch ? ogSiteMatch[1].trim() : "";
+  const ogDate = ogPubDateMatch ? ogPubDateMatch[1].trim() : (jinaDateMatch ? jinaDateMatch[1].trim() : "");
+  const ogDesc = ogDescMatch ? ogDescMatch[1].trim() : "";
+
+  if (ogTitle && ogTitle.length >= 15 && (ogType === "article" || ogType === "news" || ogDate || ogSite)) {
+    return {
+      headline: ogTitle,
+      publisher: ogSite || undefined,
+      publishedDate: ogDate || undefined,
+      summary: ogDesc || undefined,
+    };
+  }
+  return null;
+}
+
+export function parseStructuredArticle(
+  title: string,
+  url: string,
+  snippet: string,
+  fallbackPublisher?: string,
+  fallbackDate?: string,
+  pageContent?: string,
+): NewsArticle | null {
+  if (!url || isHomepageOrPortalUrl(url)) {
+    return null;
+  }
+
+  let rawHeadline = title || "";
+  let publisher = fallbackPublisher || "";
+  let publishedDate = fallbackDate;
+  let summary = snippet || "";
+  let provenArticle = false;
+
+  if (pageContent) {
+    const jsonLd = extractJsonLdArticle(pageContent, url);
+    if (jsonLd && jsonLd.headline) {
+      rawHeadline = jsonLd.headline;
+      if (jsonLd.publisher) publisher = jsonLd.publisher;
+      if (jsonLd.publishedDate) publishedDate = jsonLd.publishedDate;
+      if (jsonLd.summary) summary = jsonLd.summary;
+      provenArticle = true;
+    } else {
+      const og = extractOpenGraphArticle(pageContent, url);
+      if (og && og.headline) {
+        rawHeadline = og.headline;
+        if (og.publisher) publisher = og.publisher;
+        if (og.publishedDate) publishedDate = og.publishedDate;
+        if (og.summary && og.summary.length > summary.length) summary = og.summary;
+        provenArticle = true;
+      }
+    }
+
+    // If page content was fetched but failed to provide article metadata,
+    // require verifiable article URL structure before accepting
+    if (!provenArticle && !hasArticleUrlStructure(url)) {
+      return null;
+    }
+  } else {
+    // Search result fallback (no page content was fetched)
+    // Strictly require that the URL structure proves an individual article page
+    if (!hasArticleUrlStructure(url)) {
+      return null;
+    }
+  }
+
+  let headline = (rawHeadline || "").trim();
+
+  // Extract publisher from "Headline - Publisher" or "Headline | Publisher" or "Headline — Publisher"
+  const splitMatch = headline.match(/^(.+?)\s+[-|–—]\s+([^-|–—]+)$/);
+  if (splitMatch && splitMatch[2].length < 40) {
+    headline = splitMatch[1].trim();
+    if (!publisher || publisher === "Unknown" || publisher === "Web Source" || publisher === "DuckDuckGo") {
+      publisher = splitMatch[2].trim();
+    }
+  }
+
+  // Extract publisher from "Publisher: Headline" prefix
+  const prefixMatch = headline.match(/^([A-Z][A-Za-z0-9\s.&]{2,25}):\s+(.+)$/);
+  if (prefixMatch && prefixMatch[1].length < 25) {
+    if (!publisher || publisher === "Unknown" || publisher === "Web Source" || publisher === "DuckDuckGo") {
+      publisher = prefixMatch[1].trim();
+    }
+    headline = prefixMatch[2].trim();
+  }
+
+  if (!publisher || publisher === "Unknown" || publisher === "DuckDuckGo") {
+    try {
+      publisher = new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+      publisher = "Web Source";
+    }
+  }
+
+  // Extract date from snippet prefix (e.g. "2 hours ago - ...", "March 20, 2026 ...")
+  if (!publishedDate) {
+    const dateMatch = summary.match(/^([A-Z][a-z]{2,8}\s+\d{1,2},?\s+\d{4}|\d+\s+(?:hours?|mins?|minutes?|days?|weeks?)\s+ago)\s*[-–—:]\s*(.*)$/i);
+    if (dateMatch) {
+      publishedDate = dateMatch[1].trim();
+      summary = dateMatch[2].trim();
+    }
+  }
+
+  const article: NewsArticle = {
+    headline,
+    publisher,
+    url: url.trim(),
+    publishedDate: publishedDate?.trim() || undefined,
+    summary: summary.trim(),
+  };
+
+  if (!isValidArticle(article)) {
+    return null;
+  }
+
+  return article;
+}
+
+export class BoundedResearchService {
+  private provider: SearchProvider;
+  private maxPages = 5;
+
+  constructor(provider: SearchProvider = new DuckDuckGoProvider()) {
+    this.provider = provider;
+  }
+
+  async research(query: string, signal?: AbortSignal): Promise<ResearchResult> {
+    if (signal?.aborted) throw new Error("Aborted");
+    const receipt: WebToolReceipt = {
+      toolSelected: true,
+      querySent: null,
+      status: "not_attempted",
+      resultCount: 0,
+      openedCount: 0,
+      errorClass: null,
+    };
+
+    activity.set("searching");
+    let results: SearchResult[] = [];
+    try {
+      receipt.querySent = query;
+      const rawResults = await this.provider.search(query, 10, { signal });
+      if (signal?.aborted) throw new Error("Aborted");
+      results = rankResults(rawResults, query);
+      receipt.resultCount = results.length;
+      if (results.length === 0) {
+        receipt.status = "empty";
+        return { query, results: [], articles: [], evidence: [], sources: [], status: "failed", receipt };
+      }
+      receipt.status = "usable";
+    } catch (e: any) {
+      if (e?.message === "Aborted") throw e;
+      receipt.status = "error";
+      receipt.errorClass = "provider_unavailable";
+      return { query, results: [], articles: [], evidence: [], sources: [], status: "failed", receipt };
+    }
+
+    const evidence: ResearchResult["evidence"] = [];
+    let openedPages = 0;
+    const articleLinks: string[] = [];
+    const processedUrls = new Set<string>();
+
+    // Pass 1: Fetch and identify
+    for (const result of results) {
+      if (signal?.aborted) throw new Error("Aborted");
+      if (openedPages >= this.maxPages) {
+        break;
+      }
+
+      const page = await this.provider.readPage(result.url, { signal });
+      openedPages++;
+      processedUrls.add(result.url);
+
+      if (page.status === "success") {
+        const extracted = extractRelevantEvidence(page.content, query);
+        if (extracted && extracted.trim().length > 30) {
+          let publisher = "Unknown";
+          try {
+            publisher = new URL(result.url).hostname.replace(/^www\./, "");
+          } catch {}
+          evidence.push({
+            url: result.url,
+            title: page.title || result.title,
+            excerpt: extracted,
+            status: "page-read-success",
+            publisher,
+            publishedDate: result.date,
+            retrievedAt: new Date().toISOString(),
+            rawContent: page.content,
+          });
+        }
+
+        // If it's a landing page (has many article links), extract them for deeper reading
+        const links = extractArticleLinks(page.content, result.url);
+        if (links.length > 2) {
+          const scoredLinks = links
+            .filter((link) => !processedUrls.has(link))
+            .map((link) => ({ link, score: scoreCandidateLink(link, query) }))
+            .sort((a, b) => b.score - a.score);
+
+          for (const { link } of scoredLinks) {
+            if (articleLinks.length >= 5) break;
+            if (scoreCandidateLink(link, query) >= 0) {
+              articleLinks.push(link);
+              processedUrls.add(link);
+            }
+          }
+        }
+      } else {
+        // Full page read failed — fallback immediately to the search snippet
+        if (result.snippet && result.snippet.trim().length > 15) {
+          let publisher = "Unknown";
+          try {
+            publisher = new URL(result.url).hostname.replace(/^www\./, "");
+          } catch {}
+          evidence.push({
+            url: result.url,
+            title: result.title,
+            excerpt: result.snippet,
+            status: "snippet-evidence",
+            publisher: result.source || publisher,
+            publishedDate: result.date,
+            retrievedAt: new Date().toISOString(),
+          });
+        }
+      }
+    }
+
+    // Pass 2: Fetch specific candidate articles if we need more depth
+    if (evidence.length < 3 && articleLinks.length > 0) {
+      for (const link of articleLinks) {
+        if (signal?.aborted) throw new Error("Aborted");
+        if (openedPages >= 8) break;
+        activity.set("reading_article");
+        const page = await this.provider.readPage(link, { signal });
+        openedPages++;
+        if (page.status === "success") {
+          const extracted = extractRelevantEvidence(page.content, query);
+          if (extracted && extracted.trim().length > 30) {
+            let publisher = "Unknown";
+            try {
+              publisher = new URL(link).hostname.replace(/^www\./, "");
+            } catch {}
+            evidence.push({
+              url: link,
+              title: page.title,
+              excerpt: extracted,
+              status: "page-read-success",
+              publisher,
+              retrievedAt: new Date().toISOString(),
+              rawContent: page.content,
+            });
+          }
+        }
+      }
+    }
+
+    // Pass 3 (Guarantee): If evidence is still empty, populate from search snippets
+    if (evidence.length === 0) {
+      for (const r of results) {
+        if (r.snippet && r.snippet.trim().length > 10) {
+          let publisher = "Unknown";
+          try {
+            publisher = new URL(r.url).hostname.replace(/^www\./, "");
+          } catch {}
+          evidence.push({
+            url: r.url,
+            title: r.title,
+            excerpt: r.snippet,
+            status: "snippet-fallback",
+            publisher: r.source || publisher,
+            publishedDate: r.date,
+            retrievedAt: new Date().toISOString(),
+          });
+        }
+      }
+    }
+
+    // Extract structured articles as first-class output
+    const articles: NewsArticle[] = [];
+    const seenUrls = new Set<string>();
+
+    for (const ev of evidence) {
+      if (!seenUrls.has(ev.url)) {
+        seenUrls.add(ev.url);
+        const art = parseStructuredArticle(
+          ev.title,
+          ev.url,
+          ev.excerpt,
+          ev.publisher,
+          ev.publishedDate,
+          ev.rawContent,
+        );
+        if (art) {
+          articles.push(art);
+        }
+      }
+    }
+
+    for (const r of results) {
+      if (!seenUrls.has(r.url)) {
+        seenUrls.add(r.url);
+        const art = parseStructuredArticle(
+          r.title,
+          r.url,
+          r.snippet,
+          r.source,
+          r.date,
+        );
+        if (art) {
+          articles.push(art);
+        }
+      }
+    }
+
+    receipt.openedCount = openedPages;
+
+    const sources = buildCanonicalSources(results, articles, evidence);
+
+    return {
+      query,
+      results,
+      articles,
+      evidence,
+      sources,
+      status: evidence.length > 0 || results.length > 0 ? "success" : "insufficient",
+      receipt,
+    };
+  }
+}

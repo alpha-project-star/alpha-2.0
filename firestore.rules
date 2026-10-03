@@ -1,0 +1,173 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global helper: Is the user authenticated?
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Global helper: Is the document owner the current user?
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Validation helper for Memories
+    function isValidMemory(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.content is string && data.content.size() <= 10000 &&
+             data.createdAt is number;
+    }
+
+    // Validation helper for Notes
+    function isValidNote(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.content is string && data.content.size() <= 20000 &&
+             data.createdAt is number;
+    }
+
+    // Validation helper for Tasks
+    function isValidTask(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.title is string && data.title.size() <= 1000 &&
+             data.createdAt is number;
+    }
+
+    // Validation helper for Bills
+    function isValidBill(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.description is string && data.description.size() <= 1000 &&
+             data.amount is number &&
+             data.createdAt is number;
+    }
+
+    // Validation helper for Goals
+    function isValidGoal(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.title is string && data.title.size() <= 1000 &&
+             data.createdAt is number;
+    }
+
+    // Validation helper for Reminders
+    function isValidReminder(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.title is string && data.title.size() <= 1000 &&
+             data.dueAt is number &&
+             data.userId is string && data.userId.size() <= 128;
+    }
+
+    // Validation helper for Acknowledgements
+    function isValidAcknowledgement(data) {
+      return data.ackId is string &&
+             data.eventId is string &&
+             data.reminderId is string &&
+             data.userId is string &&
+             data.channel is string &&
+             data.status in ['pending', 'delivered', 'acknowledged', 'failed'] &&
+             data.createdAt is number &&
+             data.updatedAt is number;
+    }
+
+    // Validation helper for Notification Diagnostics
+    function isValidDiagnostic(data) {
+      return data.diagnosticId is string &&
+             data.userId is string &&
+             data.correlationId is string &&
+             data.stage is string &&
+             data.action is string &&
+             data.status is string &&
+             data.timestamp is number;
+    }
+
+    // Default deny-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // User-scoped Memories collection
+    match /users/{userId}/memories/{memoryId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(memoryId) && isValidMemory(request.resource.data) && request.resource.data.userId == userId;
+      allow update: if isOwner(userId) && isValidId(memoryId) && isValidMemory(request.resource.data) && request.resource.data.userId == userId;
+      allow delete: if isOwner(userId) && isValidId(memoryId);
+    }
+
+    // User-scoped Notes collection
+    match /users/{userId}/notes/{noteId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(noteId) && isValidNote(request.resource.data) && request.resource.data.userId == userId;
+      allow update: if isOwner(userId) && isValidId(noteId) && isValidNote(request.resource.data) && request.resource.data.userId == userId;
+      allow delete: if isOwner(userId) && isValidId(noteId);
+    }
+
+    // User-scoped Tasks collection
+    match /users/{userId}/tasks/{taskId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(taskId) && isValidTask(request.resource.data) && request.resource.data.userId == userId;
+      allow update: if isOwner(userId) && isValidId(taskId) && isValidTask(request.resource.data) && request.resource.data.userId == userId;
+      allow delete: if isOwner(userId) && isValidId(taskId);
+    }
+
+    // User-scoped Bills collection
+    match /users/{userId}/bills/{billId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(billId) && isValidBill(request.resource.data) && request.resource.data.userId == userId;
+      allow update: if isOwner(userId) && isValidId(billId) && isValidBill(request.resource.data) && request.resource.data.userId == userId;
+      allow delete: if isOwner(userId) && isValidId(billId);
+    }
+
+    // User-scoped Goals collection
+    match /users/{userId}/goals/{goalId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(goalId) && isValidGoal(request.resource.data) && request.resource.data.userId == userId;
+      allow update: if isOwner(userId) && isValidId(goalId) && isValidGoal(request.resource.data) && request.resource.data.userId == userId;
+      allow delete: if isOwner(userId) && isValidId(goalId);
+    }
+
+    // User-scoped Reminders collection
+    match /users/{userId}/reminders/{reminderId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(reminderId) && isValidReminder(request.resource.data) && request.resource.data.userId == userId;
+      allow update: if isOwner(userId) && isValidId(reminderId) && isValidReminder(request.resource.data) &&
+                       request.resource.data.userId == userId &&
+                       !('workerId' in request.resource.data) &&
+                       !('claimedAt' in request.resource.data) &&
+                       !('acceptedAt' in request.resource.data) &&
+                       !('failedAt' in request.resource.data);
+      allow delete: if isOwner(userId) && isValidId(reminderId);
+    }
+
+    // User-scoped Acknowledgements collection
+    match /users/{userId}/acknowledgements/{ackId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(ackId) && isValidAcknowledgement(request.resource.data) && request.resource.data.userId == userId;
+      allow update: if isOwner(userId) && isValidId(ackId) && isValidAcknowledgement(request.resource.data) && request.resource.data.userId == userId;
+      allow delete: if isOwner(userId) && isValidId(ackId);
+    }
+
+    // User-scoped Notification Diagnostics collection
+    match /users/{userId}/notificationDiagnostics/{diagnosticId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidId(diagnosticId) && isValidDiagnostic(request.resource.data) && request.resource.data.userId == userId;
+      allow delete: if isOwner(userId) && isValidId(diagnosticId);
+    }
+
+    // User-scoped Push Subscriptions collection
+    match /users/{userId}/pushSubscriptions/{subscriptionId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Migration state
+    match /users/{userId}/migration/state {
+      allow read, write: if isOwner(userId);
+    }
+  }
+}
