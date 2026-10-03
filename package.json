@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "start": "NITRO_PORT=3000 PORT=3000 HOST=0.0.0.0 node .output/server/index.mjs"
+    "start": "HOST=0.0.0.0 node .output/server/index.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

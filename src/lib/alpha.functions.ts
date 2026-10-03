@@ -1008,7 +1008,7 @@ async function boundAwait<T>(
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const cleanup = () => {
-      if (timer) clearTimeout(timer);
+      if (timer !== undefined) clearTimeout(timer);
       if (signal) signal.removeEventListener("abort", abortHandler);
     };
 
@@ -1020,9 +1020,8 @@ async function boundAwait<T>(
       reject(err);
     };
 
-    signal?.addEventListener("abort", abortHandler);
+    if (signal) signal.addEventListener("abort", abortHandler);
 
-    // Check for race: signal aborted between check and registration
     if (signal?.aborted) {
       abortHandler();
       return;
