@@ -139,6 +139,9 @@ export default defineConfig({
     react(),
   ].filter(Boolean),
   build: {
+    reportCompressedSize: false,
+    sourcemap: false,
+    chunkSizeWarningLimit: 2000,
     rollupOptions: {
       onwarn,
     },
@@ -146,6 +149,9 @@ export default defineConfig({
   environments: {
     client: {
       build: {
+        reportCompressedSize: false,
+        sourcemap: false,
+        chunkSizeWarningLimit: 2000,
         rollupOptions: {
           onwarn,
         },
@@ -153,6 +159,9 @@ export default defineConfig({
     },
     ssr: {
       build: {
+        reportCompressedSize: false,
+        sourcemap: false,
+        chunkSizeWarningLimit: 2000,
         rollupOptions: {
           onwarn,
         },
