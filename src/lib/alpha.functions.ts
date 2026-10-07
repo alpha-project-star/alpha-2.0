@@ -1007,18 +1007,18 @@ async function boundAwait<T>(
   return await new Promise<T>((resolve, reject) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const cleanup = () => {
+    function cleanup() {
       if (timer !== undefined) clearTimeout(timer);
       if (signal) signal.removeEventListener("abort", abortHandler);
-    };
+    }
 
-    const abortHandler = () => {
+    function abortHandler() {
       cleanup();
       const reason = signal?.reason;
       const err = (reason instanceof Error) ? reason : new Error(String(reason || "Aborted"));
       err.name = "AbortError";
       reject(err);
-    };
+    }
 
     if (signal) signal.addEventListener("abort", abortHandler);
 
@@ -1031,11 +1031,12 @@ async function boundAwait<T>(
       cleanup();
       reject(new WholeTurnTimeoutError("Turn deadline expired"));
     }, remaining);
+    if (!timer) timer = undefined;
 
     promise.then(
-      (value) => {
+      (val) => {
         cleanup();
-        resolve(value);
+        resolve(val);
       },
       (err) => {
         cleanup();

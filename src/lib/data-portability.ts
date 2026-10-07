@@ -5,6 +5,7 @@ import {
   K,
   getKey,
   isKeyForUid,
+  isAlphaKeyPrefix,
   ChatMessageSchema,
   NoteSchema,
   BillSchema,

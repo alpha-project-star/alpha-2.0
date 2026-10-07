@@ -3,11 +3,13 @@ import { z } from "zod";
 import { inspectGitHubRepository, verifyFirebaseIdToken } from "../github-repo.server";
 
 export const inspectGitHubRepo = createServerFn({ method: "POST" })
-  .inputValidator(z.object({
-    urlOrSlug: z.string().min(1),
-    subpath: z.string().optional(),
-    idToken: z.string().optional(),
-  }))
+  .validator((data: unknown) => {
+    return z.object({
+      urlOrSlug: z.string().min(1),
+      subpath: z.string().optional(),
+      idToken: z.string().optional(),
+    }).parse(data);
+  })
   .handler(async ({ data }) => {
     // If Firebase ID token is provided, verify it server-side
     if (data.idToken) {
