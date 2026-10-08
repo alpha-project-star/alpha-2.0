@@ -16,12 +16,6 @@ describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () =
       expect(prompt).toContain("WEB SEARCH IS A NATIVE TOOL AND AN ORCHESTRATOR CAPABILITY");
       expect(prompt).toContain("canonical 'web_search' function");
       expect(prompt).toContain("same authoritative search engine and evidence pipeline");
-    });
-      const prompt = DEFAULT_SYSTEM("", "", "");
-      expect(prompt).toContain("WEB SEARCH IS ORCHESTRATOR-MANAGED");
-      expect(prompt).toContain("You do NOT have a callable 'web_search' or 'search' function tool");
-      expect(prompt).toContain("Live Web Search Context (Orchestrator-Managed)");
-    });
 
     it("SEARCH_CAPABILITY_HINT describes live search as an integrated capability", () => {
         expect(SEARCH_CAPABILITY_HINT).toContain("orchestrated via live DuckDuckGo");
@@ -29,14 +23,6 @@ describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () =
     });
 
     it("executeTool executes web_search through the centralized live-search path", async () => {
-        const result = await executeTool(
-        { function: { name: "web_search", arguments: JSON.stringify({ query: "test" }) } },
-        { userId: "test-user" }
-    );
-      expect(result.operation).toBe("web_search");
-      expect(result.error?.code).not.toBe("ORCHESTRATOR_MANAGED");
-    });
-      const result = await executeTool(
         { function: { name: "web_search", arguments: JSON.stringify({ query: "test" }) } },
         { userId: "test-user" }
     );
