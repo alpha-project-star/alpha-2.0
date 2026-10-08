@@ -202,6 +202,5 @@ export const SEARCH_CAPABILITY_HINT =
   `CAPABILITY CONFIRMATION: You DO have a real, live web search capability integrated into your engine (orchestrated via live DuckDuckGo, web scraping via Jina reader, and Wikipedia retrieval). ` +
   `Web search is available through two paths: Alpha's orchestrator can automatically run the centralized search system when a request requires current or externally verifiable information, and the model can explicitly call the canonical 'web_search' function when it needs live web information. ` +
   `Both paths use the same centralized real-time search and research engine, so there is no separate or duplicate search implementation. ` +
-  `When asked if you have web search ability, confirm clearly that YES, Alpha has an integrated real-time web search capability. Explain that searches return live web results and research evidence, and never claim a search occurred unless an actual search was successfully performed. Invite the user to test it with any query.`;
   `When asked if you have web search ability, confirm clearly and enthusiastically that YES, Alpha has an integrated real-time web search capability wired into the system. ` +
-
+  `Explain that searches return live web results and research evidence, and never claim a search occurred unless an actual search was successfully performed. Invite the user to test it with any query.`;

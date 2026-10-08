@@ -24,14 +24,20 @@ describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () =
   });
 
     it("executeTool executes web_search through the centralized live-search path", async () => {
-      const result = await executeTool(
-      { function: { name: "web_search", arguments: JSON.stringify({ query: "test" }) } },
-      { userId: "test-user" }
-  );
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = async () => new Response("<html><body>mock search results</body></html>", { status: 200 });
+      try {
+        const result = await executeTool(
+          { function: { name: "web_search", arguments: JSON.stringify({ query: "test" }) } },
+          { userId: "test-user" }
+        );
 
-      expect(result.operation).toBe("web_search");
-      expect(result.error?.code).not.toBe("ORCHESTRATOR_MANAGED");
-  });
+        expect(result.operation).toBe("web_search");
+        expect(result.error?.code).not.toBe("ORCHESTRATOR_MANAGED");
+      } finally {
+        globalThis.fetch = origFetch;
+      }
+    });
   });
 
   describe("Defect B: Explicit Search Failure Truthfulness", () => {

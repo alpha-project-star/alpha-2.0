@@ -51,7 +51,6 @@ import {
   SEARCH_CAPABILITY_HINT,
 } from "./web-search";
 import { getReminderTool } from "./tool-registry";
-import { auth } from "./firebase";
 import type { FirestoreReminder } from "./reminder-repo";
 import { ALPHA_TOOLS } from "./reminder-tool-definitions";
 import { reminderContextManager } from "./reminder-context";
