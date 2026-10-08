@@ -5,29 +5,41 @@ import { SEARCH_CAPABILITY_HINT } from "../src/lib/web-search";
 
 describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () => {
   describe("Defect A: Web Search Contract & Tool Registry", () => {
-    it("ALPHA_TOOLS does NOT register a callable web_search tool", () => {
+    it("ALPHA_TOOLS registers the canonical callable web_search tool", () => {
       const toolNames = ALPHA_TOOLS.map((t) => t.function.name);
-      expect(toolNames).not.toContain("web_search");
-      expect(toolNames).not.toContain("search");
+      expect(toolNames).toContain("web_search");
+      expect(toolNames.filter((name) => name === "web_search")).toHaveLength(1);
     });
 
-    it("system prompt clearly states that Web Search is orchestrator-managed and not a callable function tool", () => {
+    it("system prompt allows both direct web_search calls and orchestrator-managed search", () => {
+      const prompt = DEFAULT_SYSTEM("", "", "");
+      expect(prompt).toContain("WEB SEARCH IS A NATIVE TOOL AND AN ORCHESTRATOR CAPABILITY");
+      expect(prompt).toContain("canonical 'web_search' function");
+      expect(prompt).toContain("same authoritative search engine and evidence pipeline");
+    });
       const prompt = DEFAULT_SYSTEM("", "", "");
       expect(prompt).toContain("WEB SEARCH IS ORCHESTRATOR-MANAGED");
       expect(prompt).toContain("You do NOT have a callable 'web_search' or 'search' function tool");
       expect(prompt).toContain("Live Web Search Context (Orchestrator-Managed)");
     });
 
-    it("SEARCH_CAPABILITY_HINT explains orchestrator execution rather than model-callable tool", () => {
-      expect(SEARCH_CAPABILITY_HINT).toContain("orchestrated via live DuckDuckGo");
-      expect(SEARCH_CAPABILITY_HINT).toContain("not via a model-callable function tool");
+    it("SEARCH_CAPABILITY_HINT describes live search as an integrated capability", () => {
+        expect(SEARCH_CAPABILITY_HINT).toContain("orchestrated via live DuckDuckGo");
+        expect(SEARCH_CAPABILITY_HINT).not.toContain("not via a model-callable function tool");
     });
 
-    it("executeTool handles accidental web_search tool calls defensively without raw UNKNOWN_TOOL crash", async () => {
+    it("executeTool executes web_search through the centralized live-search path", async () => {
+        const result = await executeTool(
+        { function: { name: "web_search", arguments: JSON.stringify({ query: "test" }) } },
+        { userId: "test-user" }
+    );
+      expect(result.operation).toBe("web_search");
+      expect(result.error?.code).not.toBe("ORCHESTRATOR_MANAGED");
+    });
       const result = await executeTool(
         { function: { name: "web_search", arguments: JSON.stringify({ query: "test" }) } },
         { userId: "test-user" }
-      );
+    );
       expect(result.success).toBe(false);
       expect(result.error.code).toBe("ORCHESTRATOR_MANAGED");
       expect(result.error.message).toContain("orchestrator");
