@@ -166,4 +166,18 @@ export const ALPHA_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "web_search",
+      description: "Perform a live web search through Alpha's centralized real-time search and research system. Use this when current, recent, externally verifiable, or otherwise live web information is needed. The search returns live web results and research evidence that Alpha can use to answer the user's request truthfully.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The web search query to run. Provide the specific topic, question, person, event, product, or information that should be researched online." },
+         },
+        required: ["query"],
+      },
+    },
+  },                                                                                                                     
 ];
