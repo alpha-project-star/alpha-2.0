@@ -9,27 +9,29 @@ describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () =
       const toolNames = ALPHA_TOOLS.map((t) => t.function.name);
       expect(toolNames).toContain("web_search");
       expect(toolNames.filter((name) => name === "web_search")).toHaveLength(1);
-    });
+  });
 
     it("system prompt allows both direct web_search calls and orchestrator-managed search", () => {
       const prompt = DEFAULT_SYSTEM("", "", "");
       expect(prompt).toContain("WEB SEARCH IS A NATIVE TOOL AND AN ORCHESTRATOR CAPABILITY");
       expect(prompt).toContain("canonical 'web_search' function");
       expect(prompt).toContain("same authoritative search engine and evidence pipeline");
+  });
 
     it("SEARCH_CAPABILITY_HINT describes live search as an integrated capability", () => {
-        expect(SEARCH_CAPABILITY_HINT).toContain("orchestrated via live DuckDuckGo");
-        expect(SEARCH_CAPABILITY_HINT).not.toContain("not via a model-callable function tool");
-    });
+      expect(SEARCH_CAPABILITY_HINT).toContain("orchestrated via live DuckDuckGo");
+      expect(SEARCH_CAPABILITY_HINT).not.toContain("not via a model-callable function tool");
+  });
 
     it("executeTool executes web_search through the centralized live-search path", async () => {
-        { function: { name: "web_search", arguments: JSON.stringify({ query: "test" }) } },
-        { userId: "test-user" }
-    );
-      expect(result.success).toBe(false);
-      expect(result.error.code).toBe("ORCHESTRATOR_MANAGED");
-      expect(result.error.message).toContain("orchestrator");
-    });
+      const result = await executeTool(
+      { function: { name: "web_search", arguments: JSON.stringify({ query: "test" }) } },
+      { userId: "test-user" }
+  );
+
+      expect(result.operation).toBe("web_search");
+      expect(result.error?.code).not.toBe("ORCHESTRATOR_MANAGED");
+  });
   });
 
   describe("Defect B: Explicit Search Failure Truthfulness", () => {
