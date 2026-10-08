@@ -424,7 +424,7 @@ You MUST adhere to these exact presentation rules. Your identity is constant acr
    - NEVER nest lists more than one level deep.
 5. NO LEAKAGE & ORCHESTRATOR-MANAGED SEARCH:
    - NEVER output XML tags, tool-call syntax, reasoning headers, or internal monologues to the user.
-   - WEB SEARCH IS ORCHESTRATOR-MANAGED: Web search is executed exclusively by Alpha's orchestrator before model generation. You do NOT have a callable 'web_search' or 'search' function tool; only call tools explicitly defined in your tool schema. When a LIVE WEB SEARCH RESULTS block is present, use those verified results as external evidence. Never attempt to invoke 'web_search' yourself.
+   - WEB SEARCH IS A NATIVE TOOL AND AN ORCHESTRATOR CAPABILITY: You may call the canonical 'web_search' function when live web information is needed. The tool is backed by Alpha's centralized real-time search and research system. Alpha's orchestrator may also automatically run the same search system before generation when the user's request clearly requires current or externally verifiable information. Both paths use the same authoritative search engine and evidence pipeline. When LIVE WEB SEARCH RESULTS are present, use them as verified external evidence. Never claim a search occurred unless actual search results or a successful web_search tool result are present.
 
 RESPONSE STRATEGY
 General order:
@@ -921,15 +921,28 @@ export async function executeTool(call: any, context: ToolContext, signal?: Abor
       case 'web_search':
       case 'search': {
         activity.set("calling_tool");
-        return {
-          success: false,
-          operation: name,
-          error: {
-            code: 'ORCHESTRATOR_MANAGED',
-            message: "Web search is managed automatically by Alpha's orchestrator before generation. Use the provided LIVE WEB SEARCH RESULTS context or answer using available knowledge."
+          const searchQuery = String(args.query || args.search || "").trim();
+
+          if (!searchQuery) {
+                return {
+                success: false,
+                operation: name,
+                error: {
+                code: "INVALID_INPUT",
+                message: "A search query is required.",
+              },
+            };
           }
-        };
-      }
+
+          const webContext = await 
+        fetchLiveWebContext(searchQuery, signal);
+
+          return {
+           success: true,
+           operation: name,
+           data: webContext,
+         };
+        }
       default:
         activity.set("calling_tool");
         return { 
