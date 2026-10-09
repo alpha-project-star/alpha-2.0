@@ -714,7 +714,7 @@ export async function fetchLiveWebContext(
     else signal.addEventListener("abort", () => ctrl.abort(), { once: true });
   }
 
-  let searchTimeoutMs = 15_000;
+  let searchTimeoutMs = 60_000;
   if (deadlineMs !== undefined) {
     const rem = deadlineMs - getMonotonicTimeMs();
     searchTimeoutMs = Math.min(searchTimeoutMs, rem);
