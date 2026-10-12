@@ -71,10 +71,7 @@ export class DuckDuckGoProvider implements SearchProvider {
       })
         .then((r) => (r.ok ? r.text() : ""))
         .catch((error: any) => {
-          if (
-            signal.aborted ||
-            error?.name === "AbortError"
-          ) {
+          if (opts?.signal?.aborted) {
             throw error;
           }
 
@@ -88,10 +85,7 @@ export class DuckDuckGoProvider implements SearchProvider {
       const title = titleMatch ? titleMatch[1] : "Page content";
       return { title, content: text, status: "success" };
     } catch (error: any) {
-      if (
-        opts?.signal?.aborted ||
-        error?.name === "AbortError"
-      ) {
+      if (opts?.signal?.aborted) {
         throw error;
       }
 
