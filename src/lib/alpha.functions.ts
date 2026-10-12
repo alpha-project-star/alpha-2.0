@@ -1939,25 +1939,65 @@ export async function runChat(
     }
 
     if (!finalResponse) {
-      try {
-        finalResponse = await callProvider(prov, model, currentHistory, sys, {
-          allowImages: hasImages,
-          maxTokens,
-          historyTurns,
-          tools: [], // Force text completion, no further tool loop
-          signal,
-        });
-      } catch (err: any) {
-        if (err instanceof WholeTurnTimeoutError || err?.name === "TimeoutError" || err?.status === 504 || err?.name === "AbortError" || signal?.aborted) {
-          throw err;
+      let finalRouteIndex = currentRouteIndex;
+      while (finalRouteIndex < routes.length) {
+        prov = routes[finalRouteIndex].prov;
+        model = routes[finalRouteIndex].model;
+        try {
+          finalResponse = await callProvider(prov, model, currentHistory, sys, {
+            allowImages: hasImages,
+            maxTokens,
+            historyTurns,
+            tools: [], // Force text completion, no further tool loop
+            signal,
+            deadlineMs,
+          });
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          if (
+            err instanceof WholeTurnTimeoutError ||
+            err?.name === "TimeoutError" ||
+            err?.status === 504 ||
+            getRemainingMs() <= 0
+          ) {
+            activity.clear();
+            throw err instanceof WholeTurnTimeoutError
+              ? err
+              : new WholeTurnTimeoutError(err?.message || "Whole-turn deadline expired.");
+          }
+          if (err?.name === "AbortError" || signal?.aborted) {
+            activity.clear();
+            throw err;
+          }
+          if (typeof console !== "undefined") {
+            console.warn(`[alpha] final completion ${prov}:${model} failed`, err?.status, err?.message);
+          }
+          const st = err?.status;
+          const retryableElsewhere =
+            st === 429 ||
+            st === 404 ||
+            st === 402 ||
+            st === 403 ||
+            st === 502 ||
+            st === 504 ||
+            (st >= 500 && st < 600) ||
+            /unavailable|no endpoints|rate.?limit|quota|empty response|timed out/i.test(
+              String(err?.message || ""),
+            );
+          if (retryableElsewhere && finalRouteIndex + 1 < routes.length) {
+            const rem = getRemainingMs();
+            if (rem <= 0) {
+              throw new WholeTurnTimeoutError("Whole-turn deadline expired during model fallback.");
+            }
+            finalRouteIndex++;
+            currentRouteIndex = finalRouteIndex;
+            activity.set("switching_model");
+            await new Promise((r) => setTimeout(r, Math.min(250, rem)));
+            continue;
+          }
+          break;
         }
-        finalResponse = {
-          finalText: lifecycle.hasCompletedMutations()
-            ? "I've completed the requested action."
-            : "I've processed your request.",
-          toolCalls: [],
-          hasToolCalls: false,
-        };
       }
     }
 
