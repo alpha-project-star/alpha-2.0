@@ -138,7 +138,7 @@ export function buildCanonicalSources(
     summary?: string,
     isStructuredArticle?: boolean,
   ): CanonicalWebSource => {
-    const cleanUrl = (url || "").trim();
+    const cleanUrl = normalizeSourceUrl((url || "").trim());
     if (!cleanUrl) {
       const fallback: CanonicalWebSource = {
         id: canonicalSources.length + 1,
