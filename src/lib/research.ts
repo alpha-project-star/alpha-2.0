@@ -570,7 +570,25 @@ export class BoundedResearchService {
         break;
       }
 
-      const page = await this.provider.readPage(result.url, { signal });
+      let page: { title: string; content: string; status: string };
+
+      try {
+        page = await this.provider.readPage(result.url, { signal });
+      } catch (error: any) {
+        if (
+          signal?.aborted ||
+          error?.name === "AbortError" ||
+          error?.message === "Aborted"
+        ) {
+          throw error;
+        }
+
+        page = {
+          title: "",
+          content: "",
+          status: "failed",
+        };
+      }
       openedPages++;
       processedUrls.add(result.url);
 
