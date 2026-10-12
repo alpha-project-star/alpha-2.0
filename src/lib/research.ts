@@ -58,21 +58,64 @@ export interface ResearchResult {
 
 export function normalizeSourceUrl(rawUrl: string): string {
   if (!rawUrl) return "";
+
   try {
-    const u = new URL(rawUrl.trim());
+    let u = new URL(rawUrl.trim());
+
+    // Unwrap DuckDuckGo redirect links so citations point to the
+    // original destination rather than the search engine redirect.
+    const host = u.hostname.toLowerCase();
+    const isDuckDuckGo =
+      host === "duckduckgo.com" ||
+      host.endsWith(".duckduckgo.com");
+
+    if (isDuckDuckGo && /^\/l\/?$/i.test(u.pathname)) {
+      const destination = u.searchParams.get("uddg");
+
+      if (destination) {
+        try {
+          const target = new URL(destination);
+
+          // Only accept web destinations; never unwrap to another protocol.
+          if (target.protocol === "https:" || target.protocol === "http:") {
+            u = target;
+          }
+        } catch {
+          // Keep the original URL if the redirect destination is malformed.
+        }
+      }
+    }
+
     const trackingParams = new Set([
-      "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-      "fbclid", "gclid", "ref", "ref_src", "source"
+      "utm_source",
+      "utm_medium",
+      "utm_campaign",
+      "utm_term",
+      "utm_content",
+      "fbclid",
+      "gclid",
+      "ref",
+      "ref_src",
+      "source",
     ]);
+
     const searchParams = new URLSearchParams(u.search);
+
     for (const p of [...searchParams.keys()]) {
-      if (trackingParams.has(p.toLowerCase()) || p.toLowerCase().startsWith("utm_")) {
+      const key = p.toLowerCase();
+
+      if (trackingParams.has(key) || key.startsWith("utm_")) {
         searchParams.delete(p);
       }
     }
-    const cleanSearch = searchParams.toString() ? `?${searchParams.toString()}` : "";
+
+    const cleanSearch = searchParams.toString()
+      ? `?${searchParams.toString()}`
+      : "";
+
     let pathname = u.pathname.replace(/\/+$/, "");
     if (!pathname) pathname = "/";
+
     return `${u.protocol}//${u.host.toLowerCase()}${pathname}${cleanSearch}`;
   } catch {
     return rawUrl.trim().toLowerCase().replace(/\/+$/, "");
