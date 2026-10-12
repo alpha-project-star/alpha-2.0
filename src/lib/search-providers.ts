@@ -78,7 +78,14 @@ export class DuckDuckGoProvider implements SearchProvider {
       const titleMatch = text.match(/^#+\s+(.*)$/m);
       const title = titleMatch ? titleMatch[1] : "Page content";
       return { title, content: text, status: "success" };
-    } catch {
+    } catch (error: any) {
+      if (
+        opts?.signal?.aborted ||
+        error?.name === "AbortError"
+      ) {
+        throw error;
+      }
+
       return { title: "", content: "", status: "failed" };
     }
   }
