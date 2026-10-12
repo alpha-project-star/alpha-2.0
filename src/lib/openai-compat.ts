@@ -524,11 +524,26 @@ export async function sendChatOpenAICompat(
       const j: any = await res.json();
       clearTimeout(timer);
 
-      const msg = j?.choices?.[0]?.message;
+      const choice = j?.choices?.[0];
+      const finishReason = choice?.finish_reason;
+      const msg = choice?.message;
       const tool_calls = msg?.tool_calls;
       const content = typeof msg?.content === "string" ? msg.content : "";
       const reasoning = msg?.reasoning_content || msg?.reasoning || "";
-      
+
+      // Never treat a token-limit-truncated response as a completed answer
+      // or execute potentially incomplete tool calls. Let the orchestrator
+      // attempt its existing model-fallback path instead.
+      if (finishReason === "length") {
+        const err: any = new Error(
+          `${opts.model} response was truncated because it reached the output-token limit.`,
+        );
+        err.status = 502;
+        err.model = opts.model;
+        err.finishReason = finishReason;
+        throw err;
+      }
+
       const normalized = extractNormalizedResponse(content, reasoning, tool_calls, opts.model);
       if (!normalized.finalText && !normalized.hasToolCalls) {
         const err: any = new Error(`${opts.model} returned an empty response.`);
