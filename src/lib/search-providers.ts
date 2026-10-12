@@ -70,7 +70,16 @@ export class DuckDuckGoProvider implements SearchProvider {
         signal,
       })
         .then((r) => (r.ok ? r.text() : ""))
-        .catch(() => "");
+        .catch((error: any) => {
+          if (
+            signal.aborted ||
+            error?.name === "AbortError"
+          ) {
+            throw error;
+          }
+
+          return "";
+        });
       
       if (!text) return { title: "", content: "", status: "failed" };
 
