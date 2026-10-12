@@ -653,7 +653,23 @@ export class BoundedResearchService {
         if (signal?.aborted) throw new Error("Aborted");
         if (openedPages >= 8) break;
         activity.set("reading_article");
-        const page = await this.provider.readPage(link, { signal });
+        let page: { title: string; content: string; status: string };
+
+        try {
+          page = await this.provider.readPage(link, { signal });
+        } catch (error: any) {
+          if (
+            signal?.aborted ||
+            error?.name === "AbortError" ||
+            error?.message === "Aborted"
+          ) {
+            throw error;
+          }
+
+          openedPages++;
+          continue;
+        }
+
         openedPages++;
         if (page.status === "success") {
           const extracted = extractRelevantEvidence(page.content, query);
