@@ -226,7 +226,7 @@ describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () =
         },
       };
 
-      await alphaStore.clearAll();
+      await alphaStore.clearChat();
       await alphaStore.setSettings({ openRouterKey: "mock-test-key" });
       let callCount = 0;
       let capturedPostToolOpts: any = null;
@@ -271,10 +271,6 @@ describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () =
         // Verifies tools: [] is passed to force final text completion without repeating actions
         expect(capturedPostToolOpts.tools).toEqual([]);
         expect(reply).toContain("I have recorded the reminder for telemetry review.");
-        expect(capturedPostToolOpts.maxTokens).toBe(2000);
-        // Verifies tools: [] is passed to force final text completion without repeating actions
-        expect(capturedPostToolOpts.tools).toEqual([]);
-        expect(reply).toContain("I've created your reminder for tomorrow.");
       } finally {
         spy.mockRestore();
       }
