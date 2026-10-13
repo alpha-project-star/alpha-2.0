@@ -1,11 +1,14 @@
-import { describe, it, expect } from "vitest";
-import { DEFAULT_SYSTEM, executeTool, fetchLiveWebContext } from "../src/lib/alpha.functions";
+import { describe, it, expect, vi } from "vitest";
+import { DEFAULT_SYSTEM, executeTool, fetchLiveWebContext, sendChat } from "../src/lib/alpha.functions";
 import { ALPHA_TOOLS } from "../src/lib/reminder-tool-definitions";
-import { SEARCH_CAPABILITY_HINT } from "../src/lib/web-search";
+import { SEARCH_CAPABILITY_HINT, SearchProvider } from "../src/lib/web-search";
 import { DuckDuckGoProvider } from "../src/lib/search-providers";
 import { BoundedResearchService } from "../src/lib/research";
 import { MAX_OUTPUT_TOKENS } from "../src/lib/models";
 import { sendChatOpenAICompat, WholeTurnTimeoutError, getMonotonicTimeMs } from "../src/lib/openai-compat";
+import * as openaiCompat from "../src/lib/openai-compat";
+import * as toolRegistryModule from "../src/lib/tool-registry";
+import { alphaStore } from "../src/lib/alpha-store";
 
 describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () => {
   describe("Defect A: Web Search Contract & Tool Registry", () => {
@@ -82,21 +85,28 @@ describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () =
       }
     });
 
-    it("BoundedResearchService.research rethrows when caller signal is aborted", async () => {
-      const origFetch = globalThis.fetch;
-      const abortErr = new Error("Aborted");
-      abortErr.name = "AbortError";
-      globalThis.fetch = async () => { throw abortErr; };
-
+    it("BoundedResearchService.research catches in-flight provider cancellation and rethrows via signal check", async () => {
+      // Exercises D1-02 catch block: signal starts un-aborted, enters research(), and aborts during provider search
       const ctrl = new AbortController();
-      ctrl.abort();
+      let searchInvoked = false;
 
-      const service = new BoundedResearchService();
-      try {
-        await expect(service.research("test query", ctrl.signal)).rejects.toThrow();
-      } finally {
-        globalThis.fetch = origFetch;
-      }
+      const mockProvider: SearchProvider = {
+        async search() {
+          searchInvoked = true;
+          ctrl.abort(); // In-flight cancellation occurs after research() initial guard!
+          const customAbortErr = new Error("Custom provider abort error");
+          customAbortErr.name = "AbortError";
+          throw customAbortErr;
+        },
+        async readPage() {
+          return { title: "", content: "", status: "failed" };
+        },
+      };
+
+      const service = new BoundedResearchService(mockProvider);
+      // Confirms provider was entered and the catch block rethrew instead of converting to { status: "failed" }
+      await expect(service.research("test query", ctrl.signal)).rejects.toThrow("Custom provider abort error");
+      expect(searchInvoked).toBe(true);
     });
 
     it("fetchLiveWebContext rejects on whole-turn deadline expiration", async () => {
@@ -115,17 +125,45 @@ describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () =
       ).rejects.toThrow();
     });
 
-    it("executeTool rethrows when caller signal is aborted instead of converting to REPOSITORY_ERROR", async () => {
+    it("executeTool catches in-flight cancellation during tool execution and rethrows instead of REPOSITORY_ERROR", async () => {
+      // Exercises D1-03 catch block: signal starts un-aborted, enters executeTool(), and aborts during tool fetch
+      const origFetch = globalThis.fetch;
       const ctrl = new AbortController();
-      ctrl.abort();
+      let fetchInvoked = false;
+
+      globalThis.fetch = async () => {
+        fetchInvoked = true;
+        ctrl.abort(); // In-flight cancellation after executeTool initial guard!
+        const err = new Error("Tool network fetch aborted mid-flight");
+        err.name = "AbortError";
+        throw err;
+      };
+
+      try {
+        await expect(
+          executeTool(
+            { function: { name: "web_search", arguments: JSON.stringify({ query: "in-flight test" }) } },
+            { userId: "test-user" },
+            ctrl.signal
+          )
+        ).rejects.toThrow("Tool network fetch aborted mid-flight");
+        expect(fetchInvoked).toBe(true);
+      } finally {
+        globalThis.fetch = origFetch;
+      }
+    });
+
+    it("executeTool rethrows WholeTurnTimeoutError thrown during tool execution instead of REPOSITORY_ERROR", async () => {
+      vi.spyOn(toolRegistryModule, "getReminderTool").mockReturnValue({
+        createReminder: vi.fn().mockRejectedValue(new WholeTurnTimeoutError("Turn deadline expired in reminder tool")),
+      } as any);
 
       await expect(
         executeTool(
-          { function: { name: "web_search", arguments: JSON.stringify({ query: "test" }) } },
-          { userId: "test-user" },
-          ctrl.signal
+          { function: { name: "createReminder", arguments: JSON.stringify({ title: "buy groceries" }) } },
+          { userId: "test-user" }
         )
-      ).rejects.toThrow();
+      ).rejects.toThrowError(WholeTurnTimeoutError);
     });
   });
 
@@ -172,6 +210,76 @@ describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () =
         globalThis.fetch = origFetch;
       }
     });
+
+    it("orchestration post-tool final completion supplies the full task token budget (2000) with empty tools", async () => {
+      // Directly verifies that alpha.functions.ts post-tool completion path passes full budget
+      const storeMap = new Map<string, string>();
+      vi.stubGlobal("navigator", { onLine: true });
+      (globalThis as any).window = {
+        navigator: { onLine: true },
+        location: { origin: "https://alpha.local" },
+        localStorage: {
+          getItem: (k: string) => storeMap.get(k) || null,
+          setItem: (k: string, v: string) => storeMap.set(k, String(v)),
+          removeItem: (k: string) => storeMap.delete(k),
+          clear: () => storeMap.clear(),
+        },
+      };
+
+      await alphaStore.clearAll();
+      await alphaStore.setSettings({ openRouterKey: "mock-test-key" });
+      let callCount = 0;
+      let capturedPostToolOpts: any = null;
+
+      vi.spyOn(toolRegistryModule, "getReminderTool").mockReturnValue({
+        createReminder: vi.fn().mockResolvedValue({ success: true, reminder: { id: "rem_1", title: "Review telemetry" } }),
+      } as any);
+
+      const spy = vi.spyOn(openaiCompat, "sendChatOpenAICompat").mockImplementation(async (_history, _sys, opts: any) => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            finalText: "",
+            toolCalls: [
+              {
+                id: "call_budget_test",
+                type: "function",
+                function: {
+                  name: "createReminder",
+                  arguments: JSON.stringify({ title: "Review telemetry", dueAt: "tomorrow at 9am" }),
+                },
+              },
+            ],
+          };
+        } else {
+          capturedPostToolOpts = opts;
+          return {
+            finalText: "I have recorded the reminder for telemetry review.",
+          };
+        }
+      });
+
+      try {
+        const reply = await sendChat([
+          { id: "u1", role: "user", text: "Please schedule telemetry review for tomorrow", ts: Date.now() },
+        ]);
+        expect(callCount).toBe(2);
+        expect(capturedPostToolOpts).not.toBeNull();
+        // Verifies the post-tool request receives full task budget (2000 for auto) and is NOT clamped to 300
+        expect(capturedPostToolOpts.maxTokens).toBe(MAX_OUTPUT_TOKENS.auto);
+        expect(capturedPostToolOpts.maxTokens).toBe(2000);
+        // Verifies tools: [] is passed to force final text completion without repeating actions
+        expect(capturedPostToolOpts.tools).toEqual([]);
+        expect(reply).toContain("I have recorded the reminder for telemetry review.");
+        expect(capturedPostToolOpts.maxTokens).toBe(2000);
+        // Verifies tools: [] is passed to force final text completion without repeating actions
+        expect(capturedPostToolOpts.tools).toEqual([]);
+        expect(reply).toContain("I've created your reminder for tomorrow.");
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 });
+
 
