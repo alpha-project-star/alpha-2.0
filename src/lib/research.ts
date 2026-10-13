@@ -552,7 +552,9 @@ export class BoundedResearchService {
       }
       receipt.status = "usable";
     } catch (e: any) {
-      if (e?.message === "Aborted") throw e;
+      if (signal?.aborted || e?.message === "Aborted") {
+        throw e;
+      }
       receipt.status = "error";
       receipt.errorClass = "provider_unavailable";
       return { query, results: [], articles: [], evidence: [], sources: [], status: "failed", receipt };

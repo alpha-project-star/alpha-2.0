@@ -955,6 +955,10 @@ export async function executeTool(call: any, context: ToolContext, signal?: Abor
     }
     return res;
   } catch (e: any) {
+    if (e instanceof WholeTurnTimeoutError || signal?.aborted) {
+      throw e;
+    }
+
     return { 
       success: false, 
       operation: name, 

@@ -30,7 +30,13 @@ export class DuckDuckGoProvider implements SearchProvider {
         signal,
       })
         .then((r) => (r.ok ? r.text() : ""))
-        .catch(() => "");
+        .catch((error: any) => {
+          if (opts?.signal?.aborted) {
+            throw error;
+          }
+
+          return "";
+        });
 
       if (text) {
         const regex = /#{1,3}\s+\[([^\]]+)\]\(([^)]+)\)([\s\S]*?)(?=#{1,3}\s+\[|$)/g;
@@ -55,7 +61,11 @@ export class DuckDuckGoProvider implements SearchProvider {
           });
         }
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (opts?.signal?.aborted) {
+        throw e;
+      }
+
       console.error("DDG search failed", e);
     }
     return results;
