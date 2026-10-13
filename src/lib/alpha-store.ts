@@ -746,18 +746,22 @@ export const alphaStore = {
   },
   getCompleteHistory(): ChatMessage[] {
     reloadState();
-    const visible = state.chat || [];
-    const internal = state.internalHistory || [];
-    const combined = [...internal, ...visible];
-    const seen = new Set<string>();
-    const deduped: ChatMessage[] = [];
-    for (const m of combined) {
-      if (m.id && seen.has(m.id)) continue;
-      if (m.id) seen.add(m.id);
-      deduped.push(m);
-    }
-    // Sort by timestamp, then by sequence number to preserve execution order
-    return deduped.sort((a, b) => {
+
+    // Independent model requests receive only the visible conversation.
+    // Internal tool calls and results remain available through the
+    // active request's in-memory history and the diagnostic retrieval path.
+    return [...(state.chat || [])].sort((a, b) => {
+      const tsDiff = (a.ts || 0) - (b.ts || 0);
+      if (tsDiff !== 0) return tsDiff;
+      return (a.seq || 0) - (b.seq || 0);
+    });
+  },
+  getDiagnosticHistory(): ChatMessage[] {
+    reloadState();
+
+    // Expose retained internal messages for debugging and diagnostics
+    // without including them in ordinary conversational history.
+    return [...(state.internalHistory || [])].sort((a, b) => {
       const tsDiff = (a.ts || 0) - (b.ts || 0);
       if (tsDiff !== 0) return tsDiff;
       return (a.seq || 0) - (b.seq || 0);
