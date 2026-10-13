@@ -154,16 +154,20 @@ describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () =
     });
 
     it("executeTool rethrows WholeTurnTimeoutError thrown during tool execution instead of REPOSITORY_ERROR", async () => {
-      vi.spyOn(toolRegistryModule, "getReminderTool").mockReturnValue({
+      const getReminderSpy = vi.spyOn(toolRegistryModule, "getReminderTool").mockReturnValue({
         createReminder: vi.fn().mockRejectedValue(new WholeTurnTimeoutError("Turn deadline expired in reminder tool")),
       } as any);
 
-      await expect(
-        executeTool(
-          { function: { name: "createReminder", arguments: JSON.stringify({ title: "buy groceries" }) } },
-          { userId: "test-user" }
-        )
-      ).rejects.toThrowError(WholeTurnTimeoutError);
+      try {
+        await expect(
+          executeTool(
+            { function: { name: "createReminder", arguments: JSON.stringify({ title: "buy groceries" }) } },
+            { userId: "test-user" }
+          )
+        ).rejects.toThrowError(WholeTurnTimeoutError);
+      } finally {
+        getReminderSpy.mockRestore();
+      }
     });
   });
 
@@ -215,7 +219,7 @@ describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () =
       // Directly verifies that alpha.functions.ts post-tool completion path passes full budget
       const storeMap = new Map<string, string>();
       vi.stubGlobal("navigator", { onLine: true });
-      (globalThis as any).window = {
+      vi.stubGlobal("window", {
         navigator: { onLine: true },
         location: { origin: "https://alpha.local" },
         localStorage: {
@@ -224,42 +228,45 @@ describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () =
           removeItem: (k: string) => storeMap.delete(k),
           clear: () => storeMap.clear(),
         },
-      };
-
-      await alphaStore.clearChat();
-      await alphaStore.setSettings({ openRouterKey: "mock-test-key" });
-      let callCount = 0;
-      let capturedPostToolOpts: any = null;
-
-      vi.spyOn(toolRegistryModule, "getReminderTool").mockReturnValue({
-        createReminder: vi.fn().mockResolvedValue({ success: true, reminder: { id: "rem_1", title: "Review telemetry" } }),
-      } as any);
-
-      const spy = vi.spyOn(openaiCompat, "sendChatOpenAICompat").mockImplementation(async (_history, _sys, opts: any) => {
-        callCount++;
-        if (callCount === 1) {
-          return {
-            finalText: "",
-            toolCalls: [
-              {
-                id: "call_budget_test",
-                type: "function",
-                function: {
-                  name: "createReminder",
-                  arguments: JSON.stringify({ title: "Review telemetry", dueAt: "tomorrow at 9am" }),
-                },
-              },
-            ],
-          };
-        } else {
-          capturedPostToolOpts = opts;
-          return {
-            finalText: "I have recorded the reminder for telemetry review.",
-          };
-        }
       });
 
+      let reminderSpy: any = null;
+      let chatSpy: any = null;
+
       try {
+        await alphaStore.clearChat();
+        await alphaStore.setSettings({ openRouterKey: "mock-test-key" });
+        let callCount = 0;
+        let capturedPostToolOpts: any = null;
+
+        reminderSpy = vi.spyOn(toolRegistryModule, "getReminderTool").mockReturnValue({
+          createReminder: vi.fn().mockResolvedValue({ success: true, reminder: { id: "rem_1", title: "Review telemetry" } }),
+        } as any);
+
+        chatSpy = vi.spyOn(openaiCompat, "sendChatOpenAICompat").mockImplementation(async (_history, _sys, opts: any) => {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              finalText: "",
+              toolCalls: [
+                {
+                  id: "call_budget_test",
+                  type: "function",
+                  function: {
+                    name: "createReminder",
+                    arguments: JSON.stringify({ title: "Review telemetry", dueAt: "tomorrow at 9am" }),
+                  },
+                },
+              ],
+            };
+          } else {
+            capturedPostToolOpts = opts;
+            return {
+              finalText: "I have recorded the reminder for telemetry review.",
+            };
+          }
+        });
+
         const reply = await sendChat([
           { id: "u1", role: "user", text: "Please schedule telemetry review for tomorrow", ts: Date.now() },
         ]);
@@ -272,10 +279,13 @@ describe("Surgical Repair: Web Search Contract, Truthfulness & Truncation", () =
         expect(capturedPostToolOpts.tools).toEqual([]);
         expect(reply).toContain("I have recorded the reminder for telemetry review.");
       } finally {
-        spy.mockRestore();
+        if (reminderSpy) reminderSpy.mockRestore();
+        if (chatSpy) chatSpy.mockRestore();
+        vi.unstubAllGlobals();
       }
     });
   });
 });
+
 
 
