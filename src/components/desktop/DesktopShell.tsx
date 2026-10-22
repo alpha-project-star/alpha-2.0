@@ -21,7 +21,7 @@ export function DesktopShell({
   showClock?: boolean;
 }) {
   const bgEnabled = useAlpha((s) => s.settings.backgroundEnabled);
-  const scanState = bgEnabled ? (active ? "scanning" : "idle") : "off";
+  const scanState = bgEnabled ? "scanning" : "off";
   return (
     <div className="hidden lg:block starfield fixed inset-0 overflow-hidden">
       <div className="absolute top-6 left-1/2 -translate-x-1/2 z-20 wordmark text-2xl select-none pointer-events-none">

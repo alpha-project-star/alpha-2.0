@@ -210,7 +210,7 @@ function OrbHome() {
         <div className="mt-1 w-[22rem] max-w-[92vw] -translate-y-7 pointer-events-none">
           <KittScanner
             curved
-            state={!bgEnabled ? "off" : active ? "scanning" : "idle"}
+            state={!bgEnabled ? "off" : "scanning"}
             bars={34}
             height={58}
           />

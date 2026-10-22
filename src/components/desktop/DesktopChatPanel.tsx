@@ -389,45 +389,7 @@ export function DesktopChatPanel() {
         </div>
       )}
 
-      {images.length > 0 && (
-        <div className="pt-2 flex gap-2 overflow-x-auto">
-          {images.map((src, i) => (
-            <div key={i} className="relative shrink-0">
-              <img src={src} className="w-14 h-14 rounded-lg object-cover" alt="" />
-              <button
-                onClick={() => setImages(images.filter((_, j) => j !== i))}
-                className="absolute -top-1 -right-1 bg-destructive rounded-full p-0.5"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
 
-      {attachedFiles.length > 0 && (
-        <div className="pt-2 flex gap-2 overflow-x-auto">
-          {attachedFiles.map((doc, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl hud-bubble text-xs text-primary shrink-0"
-            >
-              <FileText className="w-4 h-4 text-primary" />
-              <span className="max-w-[130px] truncate text-foreground font-medium">{doc.name}</span>
-              <span className="text-[10px] text-muted-foreground font-mono">
-                ({Math.round(doc.size / 1024)} KB)
-              </span>
-              <button
-                onClick={() => setAttachedFiles((prev) => prev.filter((_, j) => j !== i))}
-                className="ml-1 p-0.5 hover:text-destructive text-muted-foreground transition-colors"
-                aria-label="Remove file"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
 
       {toolsOpen && (
         <>
@@ -518,6 +480,46 @@ export function DesktopChatPanel() {
         )}
       </div>
       <div className="pt-2 flex flex-col gap-2 relative">
+        {images.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {images.map((src, i) => (
+              <div key={i} className="relative shrink-0">
+                <img src={src} className="w-14 h-14 rounded-lg object-cover border border-primary/40" alt="" />
+                <button
+                  onClick={() => setImages(images.filter((_, j) => j !== i))}
+                  className="absolute -top-1 -right-1 bg-destructive rounded-full p-0.5 text-white"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {attachedFiles.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {attachedFiles.map((doc, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl hud-bubble text-xs text-primary shrink-0"
+              >
+                <FileText className="w-4 h-4 text-primary" />
+                <span className="max-w-[130px] truncate text-foreground font-medium">{doc.name}</span>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  ({Math.round(doc.size / 1024)} KB)
+                </span>
+                <button
+                  onClick={() => setAttachedFiles((prev) => prev.filter((_, j) => j !== i))}
+                  className="ml-1 p-0.5 hover:text-destructive text-muted-foreground transition-colors"
+                  aria-label="Remove file"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <textarea
           ref={taRef}
           defaultValue={text}

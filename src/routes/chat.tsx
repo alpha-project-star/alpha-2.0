@@ -536,45 +536,7 @@ function ChatRoute() {
 
 
 
-        {images.length > 0 && (
-          <div className="px-3 pb-2 flex gap-2 overflow-x-auto">
-            {images.map((src, i) => (
-              <div key={i} className="relative shrink-0">
-                <img src={src} className="w-16 h-16 rounded-lg object-cover" alt="" />
-                <button
-                  onClick={() => setImages(images.filter((_, j) => j !== i))}
-                  className="absolute -top-1 -right-1 bg-destructive rounded-full p-0.5"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
 
-        {attachedFiles.length > 0 && (
-          <div className="px-3 pb-2 flex gap-2 overflow-x-auto">
-            {attachedFiles.map((doc, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass neon-border text-xs text-primary shrink-0"
-              >
-                <FileText className="w-4 h-4 text-primary" />
-                <span className="max-w-[130px] truncate text-foreground font-medium">{doc.name}</span>
-                <span className="text-[10px] text-muted-foreground font-mono">
-                  ({Math.round(doc.size / 1024)} KB)
-                </span>
-                <button
-                  onClick={() => setAttachedFiles((prev) => prev.filter((_, j) => j !== i))}
-                  className="ml-1 p-0.5 hover:text-destructive text-muted-foreground transition-colors"
-                  aria-label="Remove file"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
 
         <div className="p-3 glass border-t border-primary/20 relative shrink-0 z-20">
           {/* Adaptive single scroll button: Centered cleanly above composer bar (hidden when Alpha is responding or animating) */}
@@ -619,6 +581,76 @@ function ChatRoute() {
               </div>
             </>
           )}
+
+          {attachmentsOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setAttachmentsOpen(false)}
+              />
+              <div className="absolute bottom-full left-2 right-2 mb-2 z-20 glass neon-border rounded-2xl p-2 grid grid-cols-4 gap-2">
+                {/* 1. Upload Image */}
+                <label className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer">
+                  <ImagePlus className="w-5 h-5 text-primary" />
+                  <span className="text-[10px] text-foreground/80">Upload</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    hidden
+                    onChange={(e) => {
+                      pickImages(e.target.files);
+                      setAttachmentsOpen(false);
+                    }}
+                  />
+                </label>
+
+                {/* 2. Take Photo */}
+                <label className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer">
+                  <Camera className="w-5 h-5 text-primary" />
+                  <span className="text-[10px] text-foreground/80">Photo</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    hidden
+                    onChange={(e) => {
+                      pickImages(e.target.files);
+                      setAttachmentsOpen(false);
+                    }}
+                  />
+                </label>
+
+                {/* 3. Live Cyber-Eye */}
+                <button
+                  onClick={() => {
+                    toggleEye();
+                    setAttachmentsOpen(false);
+                  }}
+                  className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer"
+                >
+                  {eyeOn ? <EyeOff className="w-5 h-5 text-destructive" /> : <Eye className="w-5 h-5 text-primary" />}
+                  <span className="text-[10px] text-foreground/80">{eyeOn ? "Stop Eye" : "Live Eye"}</span>
+                </button>
+
+                {/* 4. Attach File */}
+                <label className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer">
+                  <FileText className="w-5 h-5 text-primary" />
+                  <span className="text-[10px] text-foreground/80">File</span>
+                  <input
+                    type="file"
+                    accept=".pdf,.docx,.doc,.txt,.md,.csv,.json,.py,.ts,.js,.html"
+                    multiple
+                    hidden
+                    onChange={(e) => {
+                      void pickFiles(e.target.files);
+                      setAttachmentsOpen(false);
+                    }}
+                  />
+                </label>
+              </div>
+            </>
+          )}
           {micError && <div className="mb-2 text-xs text-destructive">{micError}</div>}
           {eyeError && <div className="mb-2 text-xs text-destructive">{eyeError}</div>}
           {eyeOn && (
@@ -630,10 +662,10 @@ function ChatRoute() {
             {/* Thunder / Lightning icon */}
             <Zap className="w-3.5 h-3.5 text-primary shrink-0" />
 
-            {/* Mode toggle button: black inside, black text, thin border */}
+            {/* Mode toggle button: black inside, blue text, thin border */}
             <button
               onClick={() => setModeMenuOpen((v) => !v)}
-              className="text-[11px] font-semibold px-3 py-1 rounded-full bg-black text-black border border-primary/40 hover:border-primary transition-all active:scale-95 shadow-sm"
+              className="text-[11px] font-semibold px-3 py-1 rounded-full bg-black text-primary border border-primary/40 hover:border-primary transition-all active:scale-95 shadow-sm"
               title="Toggle Mode options"
             >
               Mode
@@ -693,6 +725,46 @@ function ChatRoute() {
           </div>
           {/* Composer: full-width growing textarea, all controls docked on the left row below */}
           <div className="flex flex-col gap-2">
+            {images.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {images.map((src, i) => (
+                  <div key={i} className="relative shrink-0">
+                    <img src={src} className="w-14 h-14 rounded-lg object-cover border border-primary/40" alt="" />
+                    <button
+                      onClick={() => setImages(images.filter((_, j) => j !== i))}
+                      className="absolute -top-1 -right-1 bg-destructive rounded-full p-0.5 text-white"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {attachedFiles.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {attachedFiles.map((doc, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass neon-border text-xs text-primary shrink-0"
+                  >
+                    <FileText className="w-4 h-4 text-primary" />
+                    <span className="max-w-[130px] truncate text-foreground font-medium">{doc.name}</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      ({Math.round(doc.size / 1024)} KB)
+                    </span>
+                    <button
+                      onClick={() => setAttachedFiles((prev) => prev.filter((_, j) => j !== i))}
+                      className="ml-1 p-0.5 hover:text-destructive text-muted-foreground transition-colors"
+                      aria-label="Remove file"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <textarea
               ref={taRef}
               defaultValue={text}
@@ -733,76 +805,7 @@ function ChatRoute() {
                   <Paperclip className="w-5 h-5 text-primary" />
                 </button>
 
-                {attachmentsOpen && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-30"
-                      onClick={() => setAttachmentsOpen(false)}
-                    />
-                    {/* Attachment menu: blocky grid identical to the burger tools popup layout */}
-                    <div className="absolute bottom-full left-0 mb-2 z-40 glass neon-border rounded-2xl p-2 grid grid-cols-4 gap-2 min-w-[280px]">
-                      {/* 1. Upload Image */}
-                      <label className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer">
-                        <ImagePlus className="w-5 h-5 text-primary" />
-                        <span className="text-[10px] text-foreground/80">Upload</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          multiple
-                          hidden
-                          onChange={(e) => {
-                            pickImages(e.target.files);
-                            setAttachmentsOpen(false);
-                          }}
-                        />
-                      </label>
-
-                      {/* 2. Take Photo */}
-                      <label className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer">
-                        <Camera className="w-5 h-5 text-primary" />
-                        <span className="text-[10px] text-foreground/80">Photo</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
-                          hidden
-                          onChange={(e) => {
-                            pickImages(e.target.files);
-                            setAttachmentsOpen(false);
-                          }}
-                        />
-                      </label>
-
-                      {/* 3. Live Cyber-Eye */}
-                      <button
-                        onClick={() => {
-                          toggleEye();
-                          setAttachmentsOpen(false);
-                        }}
-                        className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer"
-                      >
-                        {eyeOn ? <EyeOff className="w-5 h-5 text-destructive" /> : <Eye className="w-5 h-5 text-primary" />}
-                        <span className="text-[10px] text-foreground/80">{eyeOn ? "Stop Eye" : "Live Eye"}</span>
-                      </button>
-
-                      {/* 4. Attach File */}
-                      <label className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer">
-                        <FileText className="w-5 h-5 text-primary" />
-                        <span className="text-[10px] text-foreground/80">File</span>
-                        <input
-                          type="file"
-                          accept=".pdf,.docx,.doc,.txt,.md,.csv,.json,.py,.ts,.js,.html"
-                          multiple
-                          hidden
-                          onChange={(e) => {
-                            void pickFiles(e.target.files);
-                            setAttachmentsOpen(false);
-                          }}
-                        />
-                      </label>
-                    </div>
-                  </>
-                )}
+                
               </div>
 
               <div className="ml-auto flex items-center gap-1.5 shrink-0">

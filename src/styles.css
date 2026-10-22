@@ -455,59 +455,137 @@
   display: block;
   width: 100%;
   overflow: visible;
-  filter: drop-shadow(0 0 10px oklch(0.4 0.16 260 / 0.7));
 }
 .kitt-arc-rail {
   fill: none;
-  stroke: oklch(0.7 0.01 240 / 0.28);
+  stroke: #000000;
   stroke-width: 18;
   stroke-linecap: round;
 }
 .kitt-arc-frame {
   fill: none;
-  stroke: oklch(0.45 0.15 260 / 0.5);
-  stroke-width: 22;
+  stroke: #000000;
+  stroke-width: 20;
   stroke-linecap: round;
-  opacity: 0.35;
-  filter: drop-shadow(0 0 6px oklch(0.4 0.16 260 / 0.45));
 }
 .kitt-arc-segment {
-  fill: oklch(0.78 0.3 258);
-  opacity: 0.25;
-  filter: drop-shadow(0 0 8px oklch(0.78 0.3 258 / 1));
-  animation: kitt-arc-pulse var(--kitt-dur, 1800ms) ease-in-out infinite alternate;
+  fill: #000000;
+  stroke: #060912;
+  stroke-width: 0.5;
+  opacity: 0.7;
+  animation-name: kitt-arc-sweep;
+  animation-duration: var(--kitt-dur, 2600ms);
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+  animation-direction: alternate;
+}
+.kitt-arc-segment-end {
+  fill: #0047FF;
+  stroke: #0047FF;
+  stroke-width: 1.5;
+  filter: drop-shadow(0 0 6px #0047FF) drop-shadow(0 0 12px #0047FF);
+  animation: kitt-end-pulse var(--kitt-dur, 2600ms) ease-in-out infinite alternate;
 }
 .kitt-arc-gap {
-  fill: oklch(0.06 0.04 260 / 0.96);
-  stroke: oklch(0.86 0.01 240 / 0.55);
-  stroke-width: 1;
-  filter: drop-shadow(0 0 6px oklch(0.4 0.16 260 / 0.55));
+  fill: #000000;
+  stroke: #0047FF;
+  stroke-width: 1.5;
+  filter: drop-shadow(0 0 4px #0047FF);
 }
+.kitt-arc.kitt-off .kitt-arc-segment-end,
 .kitt-arc.kitt-off .kitt-arc-segment {
+  opacity: 0.2;
+  filter: none;
   animation: none;
-  opacity: 0.05;
 }
 .kitt-arc.kitt-off .kitt-arc-rail,
+.kitt-arc.kitt-off .kitt-arc-frame,
 .kitt-arc.kitt-off .kitt-arc-gap {
-  opacity: 0.15;
+  opacity: 0.2;
   filter: none;
 }
-.kitt-arc.kitt-alert .kitt-arc-segment {
+.kitt-arc.kitt-alert .kitt-arc-segment-end {
   fill: oklch(0.88 0.22 58);
+  stroke: oklch(0.88 0.22 58);
   filter: drop-shadow(0 0 7px oklch(0.85 0.22 55 / 0.95));
 }
-@keyframes kitt-arc-pulse {
-  0% {
-    opacity: 0.16;
+.kitt-arc.kitt-alert .kitt-arc-gap {
+  stroke: oklch(0.88 0.22 58);
+  filter: drop-shadow(0 0 5px oklch(0.85 0.22 55 / 0.95));
+}
+.kitt-arc.kitt-alert .kitt-arc-segment {
+  animation-name: kitt-arc-sweep-alert;
+}
+@keyframes kitt-arc-sweep {
+  0%,
+  100% {
+    fill: #000000;
+    stroke: #060912;
+    stroke-width: 0.5;
+    opacity: 0.7;
+    filter: none;
   }
-  48% {
-    opacity: 0.42;
+  36% {
+    fill: #000000;
+    stroke: #060912;
+    stroke-width: 0.5;
+    opacity: 0.7;
+    filter: none;
   }
-  55% {
+  50% {
+    fill: #0047FF;
+    stroke: #0047FF;
+    stroke-width: 1.2;
     opacity: 1;
+    filter: drop-shadow(0 0 6px #0047FF) drop-shadow(0 0 10px #0047FF);
+  }
+  64% {
+    fill: #000000;
+    stroke: #060912;
+    stroke-width: 0.5;
+    opacity: 0.7;
+    filter: none;
+  }
+}
+@keyframes kitt-arc-sweep-alert {
+  0%,
+  100% {
+    fill: #000000;
+    stroke: #160c04;
+    stroke-width: 0.5;
+    opacity: 0.7;
+    filter: none;
+  }
+  36% {
+    fill: #000000;
+    stroke: #160c04;
+    stroke-width: 0.5;
+    opacity: 0.7;
+    filter: none;
+  }
+  50% {
+    fill: oklch(0.88 0.22 58);
+    stroke: oklch(0.88 0.22 58);
+    stroke-width: 1.2;
+    opacity: 1;
+    filter: drop-shadow(0 0 6px oklch(0.88 0.22 58)) drop-shadow(0 0 10px oklch(0.88 0.22 58));
+  }
+  64% {
+    fill: #000000;
+    stroke: #160c04;
+    stroke-width: 0.5;
+    opacity: 0.7;
+    filter: none;
+  }
+}
+@keyframes kitt-end-pulse {
+  0% {
+    filter: drop-shadow(0 0 5px #0047FF) drop-shadow(0 0 10px #0047FF);
+    opacity: 0.9;
   }
   100% {
-    opacity: 0.2;
+    filter: drop-shadow(0 0 8px #0047FF) drop-shadow(0 0 16px #0047FF);
+    opacity: 1;
   }
 }
 
@@ -755,12 +833,13 @@
   font-style: italic;
 }
 
-.alpha-prose ul,
-.alpha-prose ol {
+.alpha-prose ul {
+  list-style-type: disc;
   margin: 8px 0 16px 0;
   padding-left: 24px;
 }
 .alpha-prose ol {
+  margin: 8px 0 16px 0;
   padding-left: 28px;
 }
 .alpha-prose li {

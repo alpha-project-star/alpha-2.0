@@ -116,17 +116,21 @@ export function KittScanner({
     // Central gap divider at the very bottom of the orb.
     const gap = pt(90);
 
-    const renderBar = (b: { x: number; y: number; angle: number; delay: number }, key: string) => (
+    const renderBar = (
+      b: { x: number; y: number; angle: number; delay: number },
+      key: string,
+      isEnd: boolean,
+    ) => (
       <rect
         key={key}
-        className="kitt-arc-segment"
+        className={isEnd ? "kitt-arc-segment-end" : "kitt-arc-segment"}
         x={b.x - 5}
         y={b.y - 7}
         width="10"
         height="14"
         rx="2"
         style={{
-          animationDelay: `${b.delay}ms`,
+          animationDelay: `-${b.delay}ms`,
           transformOrigin: `${b.x}px ${b.y}px`,
           transform: `rotate(${b.angle}deg)`,
         }}
@@ -145,8 +149,8 @@ export function KittScanner({
         <path className="kitt-arc-frame" d={railR} />
         <path className="kitt-arc-rail" d={railL} />
         <path className="kitt-arc-rail" d={railR} />
-        {barsL.map((b, i) => renderBar(b, `l${i}`))}
-        {barsR.map((b, i) => renderBar(b, `r${i}`))}
+        {barsL.map((b, i) => renderBar(b, `l${i}`, i === 0))}
+        {barsR.map((b, i) => renderBar(b, `r${i}`, i === barsR.length - 1))}
         <rect className="kitt-arc-gap" x={gap.x - 2} y={gap.y - 12} width="4" height="22" rx="2" />
       </svg>
     );
@@ -210,13 +214,13 @@ export function KittScanner({
     >
       <div className="kitt-half left" style={halfStyle}>
         {Array.from({ length: half }).map((_, i) => (
-          <span key={i} className="kitt-bar" style={{ animationDelay: `${delayFor(i)}ms` }} />
+          <span key={i} className="kitt-bar" style={{ animationDelay: `-${delayFor(i)}ms`, background: "#0047FF" }} />
         ))}
       </div>
-      <div className="kitt-gap" />
+      <div className="kitt-gap" style={{ background: "#000000" }} />
       <div className="kitt-half right" style={halfStyle}>
         {Array.from({ length: half }).map((_, i) => (
-          <span key={i} className="kitt-bar" style={{ animationDelay: `${delayFor(i)}ms` }} />
+          <span key={i} className="kitt-bar" style={{ animationDelay: `-${delayFor(i)}ms`, background: "#0047FF" }} />
         ))}
       </div>
     </div>

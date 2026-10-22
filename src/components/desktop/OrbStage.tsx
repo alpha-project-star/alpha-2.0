@@ -20,13 +20,11 @@ export function OrbStage({ active }: { active: boolean }) {
 
   const scannerState: KittState = !bgEnabled
     ? "off"
-    : active || act.kind === "listening"
-      ? "scanning"
-      : speaking
-        ? "speaking"
-        : busy
-          ? "processing"
-          : "idle";
+    : speaking
+      ? "speaking"
+      : busy
+        ? "processing"
+        : "scanning";
 
   return (
     <div className="relative flex items-center justify-center w-full h-full">
