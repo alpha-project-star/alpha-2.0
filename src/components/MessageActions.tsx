@@ -15,7 +15,7 @@ export function MessageActions({
 }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className={`flex items-center gap-2 ${compact ? "mt-1 justify-end" : "mt-2"} opacity-70`}>
+    <div className={`flex items-center gap-1.5 ${compact ? "mt-1 justify-end" : "mt-2"} opacity-80`}>
       {!compact && (
         <button
           onClick={() => {
@@ -23,7 +23,7 @@ export function MessageActions({
             speakWith(text);
           }}
           aria-label="Speak again"
-          className="p-1.5 rounded-md hover:bg-primary/10"
+          className="p-1.5 rounded-lg bg-background/60 border border-primary/30 hover:border-primary/60 hover:bg-primary/10 transition-all active:scale-95"
         >
           <Volume2 className="w-4 h-4 text-primary" />
         </button>
@@ -37,7 +37,7 @@ export function MessageActions({
           } catch {}
         }}
         aria-label="Copy"
-        className="p-1.5 rounded-md hover:bg-primary/10"
+        className="p-1.5 rounded-lg bg-background/60 border border-primary/30 hover:border-primary/60 hover:bg-primary/10 transition-all active:scale-95"
       >
         {copied ? (
           <Check className="w-4 h-4 text-primary" />
@@ -49,7 +49,7 @@ export function MessageActions({
         <button
           onClick={onRetry}
           aria-label="Regenerate"
-          className="p-1.5 rounded-md hover:bg-primary/10"
+          className="p-1.5 rounded-lg bg-background/60 border border-primary/30 hover:border-primary/60 hover:bg-primary/10 transition-all active:scale-95"
         >
           <RotateCcw className="w-4 h-4 text-primary" />
         </button>
@@ -58,7 +58,7 @@ export function MessageActions({
         <button
           onClick={onDelete}
           aria-label="Delete message"
-          className="p-1.5 rounded-md hover:bg-destructive/20"
+          className="p-1.5 rounded-lg bg-background/60 border border-destructive/30 hover:border-destructive/60 hover:bg-destructive/10 transition-all active:scale-95"
         >
           <Trash2 className="w-4 h-4 text-destructive" />
         </button>

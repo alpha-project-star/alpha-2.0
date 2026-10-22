@@ -27,3 +27,4 @@ function NotesRoute() {
     </div>
   );
 }
+export default NotesRoute;

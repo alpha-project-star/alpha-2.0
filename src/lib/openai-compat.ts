@@ -561,11 +561,14 @@ export async function sendChatOpenAICompat(
       if (ctrl.signal.aborted || e?.name === "AbortError" || /aborted/i.test(e?.message || "")) {
         if (getRemaining() <= 0) {
           throw new WholeTurnTimeoutError(
-            `${opts.model} timed out after ${Math.round(fetchTimeoutMs / 1000)}s.`,
+            `${opts.model} timed out after ${Math.round(fetchTimeoutMs / 1000)}s: whole-turn deadline expired.`,
           );
         }
-        const err: any = new Error("Aborted");
-        err.name = "AbortError";
+        // Per-request timeout while turn deadline is still active — allow model route fallback
+        const err: any = new Error(`${opts.model} request timed out after ${Math.round(fetchTimeoutMs / 1000)}s.`);
+        err.name = "TimeoutError";
+        err.status = 504;
+        err.model = opts.model;
         throw err;
       }
       // Network blip — one bounded retry with backoff.

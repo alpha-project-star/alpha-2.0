@@ -39,3 +39,5 @@ function TasksRoute() {
     </div>
   );
 }
+
+export default TasksRoute;

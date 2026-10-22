@@ -27,3 +27,4 @@ function MemoriesRoute() {
     </div>
   );
 }
+export default MemoriesRoute;

@@ -239,10 +239,10 @@
 
 @layer utilities {
   .glass {
-    background: linear-gradient(135deg, oklch(0.1 0.04 262 / 0.6), oklch(0.03 0.02 262 / 0.75));
+    background: linear-gradient(135deg, oklch(0.1 0.04 262 / 0.7), oklch(0.03 0.02 262 / 0.85));
     backdrop-filter: blur(18px) saturate(140%);
     -webkit-backdrop-filter: blur(18px) saturate(140%);
-    border: 1px solid oklch(0.7 0.01 240 / 0.22);
+    border: 1px solid oklch(0.68 0.26 258 / 0.45);
   }
   .neon-text {
     color: oklch(0.82 0.28 258);

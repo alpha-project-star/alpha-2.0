@@ -180,4 +180,32 @@ export const ALPHA_TOOLS = [
       },
     },
   },                                                                                                                     
+  {
+    type: "function",
+    function: {
+      name: "generateImage",
+      description: "Generate, synthesize, draw, paint, or render a new image, photo, or visual artwork from scratch based on a text prompt. Call this whenever the user requests an image, photo, artwork, wallpaper, drawing, or visual depiction (e.g., 'generate a picture of a dog', 'draw a sunset', 'create an image of a cybernetic city').",
+      parameters: {
+        type: "object",
+        properties: {
+          prompt: { type: "string", description: "Detailed descriptive prompt specifying subject, style, lighting, atmosphere, and composition for the image to generate." },
+        },
+        required: ["prompt"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "generateVideo",
+      description: "Generate, animate, or synthesize a video clip, animated scene, or motion video from scratch based on a prompt. Call this whenever the user requests a video, clip, motion scene, or animation (e.g., 'make a video of snow falling in a city', 'create a short video clip of waves crashing').",
+      parameters: {
+        type: "object",
+        properties: {
+          prompt: { type: "string", description: "Detailed motion and scene description for the video or animation to generate." },
+        },
+        required: ["prompt"],
+      },
+    },
+  },
 ];

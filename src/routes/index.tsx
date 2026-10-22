@@ -138,6 +138,10 @@ function OrbHome() {
       await speakWith(reply);
       setStatus(recognizer.isWanted ? "Listening…" : "Tap the orb to begin");
     } catch (e: any) {
+      if (e?.name === "AbortError" || /aborted/i.test(e?.message || "")) {
+        setStatus("Tap the orb to begin");
+        return;
+      }
       const msg = e?.message || "Error";
       await alphaStore.appendChat({ id: uid(), role: "system", text: msg, ts: Date.now(), error: true });
       setStatus(msg.slice(0, 80));
@@ -325,3 +329,5 @@ function OrbHome() {
     </>
   );
 }
+
+export default OrbHome;

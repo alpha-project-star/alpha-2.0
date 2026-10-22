@@ -8,8 +8,11 @@ import type {
 import {
   stripProviderIdentityLeaks,
   stripReasoningAndScratchpads,
+  stripToolLeakage,
+  stripSystemPromptEchoes,
   verifyAndReconcileActions,
   verifyAndReconcileSources,
+  reconcileDeferredProse,
 } from "./verifiers";
 
 export * from "./types";
@@ -83,6 +86,20 @@ export class AlphaGate {
       const providerResult = stripProviderIdentityLeaks(currentText);
       currentText = providerResult.text;
       if (providerResult.stripped) {
+        diagnostics.providerLeakStripped = true;
+      }
+
+      // Stage 2.5: Tool Leakage & Status String Scrubber
+      const toolLeakResult = stripToolLeakage(currentText);
+      currentText = toolLeakResult.text;
+      if (toolLeakResult.stripped) {
+        diagnostics.actionRepaired = true;
+      }
+
+      // Stage 2.6: System Prompt & Role Echo Scrubber
+      const echoResult = stripSystemPromptEchoes(currentText);
+      currentText = echoResult.text;
+      if (echoResult.stripped) {
         diagnostics.providerLeakStripped = true;
       }
 

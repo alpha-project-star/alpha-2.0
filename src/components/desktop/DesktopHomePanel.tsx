@@ -37,7 +37,7 @@ export function DesktopHomePanel({ status, interim }: { status: string; interim:
             label={m.role === "user" ? "YOU" : "ALPHA"}
           >
             {m.role === "model" ? (
-              <MessageContent text={m.text} />
+              <MessageContent text={m.text} images={m.images} videos={m.videos} />
             ) : (
               <div className="whitespace-pre-wrap">{m.text}</div>
             )}

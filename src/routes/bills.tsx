@@ -10,7 +10,7 @@ export const Route = createFileRoute("/bills")({
 
 function BillsRoute() {
   const bills = useAlpha(s => s.bills);
-  const total = bills.reduce((s, b) => s + (b.balance || 0), 0);
+  const total = bills.reduce((s, b) => s + (Number(b.balance) || 0), 0);
   return (
     <div className="starfield min-h-screen">
       <ToolHeader
@@ -38,3 +38,4 @@ function BillsRoute() {
     </div>
   );
 }
+export default BillsRoute;

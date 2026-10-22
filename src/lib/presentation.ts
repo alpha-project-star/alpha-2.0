@@ -146,14 +146,38 @@ export function normalizePresentation(input: string): string {
       // 7. Enforce paragraph separation (Double newlines between distinct blocks)
       text = enforceParagraphSeparation(text);
 
-      // 8. Strip any surviving tool-call or thinking leakage that might have escaped prior filters
+      // 8. Convert any media hyperlinks or bare media URLs into embedded markdown (![...](url))
+      text = normalizeMediaEmbeds(text);
+
+      // 9. Strip any surviving tool-call or thinking leakage that might have escaped prior filters
       text = stripPresentationLeakage(text);
+
+      // 10. Enforce modern ChatGPT-style canonical structure (bold lead-ins, bulleted breakdowns)
+      text = applyCanonicalPresentation(text);
 
       normalizedSegments.push(text);
     }
   }
 
   return normalizedSegments.join("\n");
+}
+
+/**
+ * Normalizes media links and standalone image/video URLs into embedded Markdown image/video tags (![...](url))
+ * so that media is always displayed directly in chat rather than as an external hyperlink.
+ */
+export function normalizeMediaEmbeds(text: string): string {
+  if (!text) return "";
+
+  // 1. Upgrade [label](mediaUrl) to ![label](mediaUrl) if it lacks the leading '!'
+  const linkMediaRegex = /(?<![!\w])\[([^\]]*)\]\((https?:\/\/[^\s)]+(?:image\.pollinations\.ai|upload\.wikimedia\.org[^\s)]+\.(?:webm|mp4|ogv)|\.(?:png|jpe?g|gif|webp|svg|avif|webm|mp4|ogv))[^\s)]*)\)/gi;
+  let out = text.replace(linkMediaRegex, "![$1]($2)");
+
+  // 2. Convert standalone media URLs on their own line into ![Media](url)
+  const standaloneMediaRegex = /^(\s*)(https?:\/\/(?:image\.pollinations\.ai[^\s]+|upload\.wikimedia\.org[^\s]+\.(?:webm|mp4|ogv)|[^\s]+\.(?:png|jpe?g|gif|webp|svg|avif|webm|mp4|ogv))[^\s]*)(\s*)$/gim;
+  out = out.replace(standaloneMediaRegex, "$1![Media]($2)$3");
+
+  return out;
 }
 
 /**
@@ -423,3 +447,48 @@ export function repairUnclosedFences(text: string): string {
 
   return result.join("\n");
 }
+
+/**
+ * Transforms unstructured multi-sentence text paragraphs into clean, modern,
+ * ChatGPT-style structured presentations featuring bold lead-ins and bulleted points.
+ */
+function applyCanonicalPresentation(text: string): string {
+  if (!text || text.length < 150) return text;
+
+  // If text already contains markdown lists or headings, respect its structure
+  if (/^[\s]*[-*#\d+.]/m.test(text)) {
+    return text;
+  }
+
+  const paragraphs = text.split(/\n\n+/);
+  const structured: string[] = [];
+
+  for (const p of paragraphs) {
+    const trimmed = p.trim();
+    if (!trimmed) continue;
+
+    const sentences = trimmed.match(/[^.!?]+[.!?]+(?:\s+|$)/g) || [trimmed];
+    if (sentences.length >= 3 && !trimmed.startsWith(">") && !trimmed.startsWith("##")) {
+      const bullets: string[] = [];
+      for (let i = 0; i < sentences.length; i++) {
+        const s = sentences[i].trim();
+        if (i === 0) {
+          structured.push(`**Overview**: ${s}`);
+        } else {
+          const words = s.split(" ");
+          const lead = words.slice(0, 3).join(" ");
+          const rest = words.slice(3).join(" ");
+          bullets.push(`- **${lead}**: ${rest}`);
+        }
+      }
+      if (bullets.length > 0) {
+        structured.push(bullets.join("\n"));
+      }
+    } else {
+      structured.push(trimmed);
+    }
+  }
+
+  return structured.join("\n\n");
+}
+

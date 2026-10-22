@@ -282,13 +282,59 @@ function SafeImage({ src, alt }: { src?: string; alt?: string }) {
   );
 }
 
+/** Video Component with Zero Broken Video Policy */
+function SafeVideo({ src, alt }: { src?: string; alt?: string }) {
+  const [videoError, setVideoError] = useState(false);
+
+  if (!src) {
+    return (
+      <span className="block my-4 p-4 rounded-xl border border-muted/40 bg-card flex items-center gap-3 text-muted-foreground text-xs">
+        <ImageIcon className="w-5 h-5 shrink-0" />
+        <span>[Video unavailable: {alt || "generated video"}]</span>
+      </span>
+    );
+  }
+
+  if (videoError) {
+    return <SafeImage src={src} alt={alt || "Generated video"} />;
+  }
+
+  return (
+    <div className="my-4 rounded-xl border border-border/50 bg-black/60 overflow-hidden shadow-lg p-2 max-w-xl">
+      <video
+        src={src}
+        controls
+        playsInline
+        autoPlay
+        loop
+        muted
+        onError={() => setVideoError(true)}
+        className="alpha-video rounded-lg w-full max-h-[480px] object-contain bg-black"
+      />
+      <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground px-1">
+        <span className="truncate">{alt || "Generated Video"}</span>
+        <a
+          href={src}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary hover:underline shrink-0 ml-2"
+        >
+          Open full size ↗
+        </a>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The single rich-text renderer for ALL Alpha-generated content: chat replies,
  * notes, memories, reminders, plans, bills, tool results and search summaries.
  */
-export function RichText({ text, size = "base" }: { text: string; size?: "base" | "compact" }) {
+export function RichText({ text, images, videos, size = "base" }: { text: string; images?: string[]; videos?: string[]; size?: "base" | "compact" }) {
   return (
     <MathErrorBoundary>
+      {images?.map((img, i) => <SafeImage key={i} src={img} />)}
+      {videos?.map((vid, i) => <SafeVideo key={i} src={vid} />)}
       <div className={`alpha-prose${size === "compact" ? " alpha-prose-compact" : ""}`}>
         <ReactMarkdown
           remarkPlugins={[remarkMath, remarkGfm]}
@@ -297,6 +343,31 @@ export function RichText({ text, size = "base" }: { text: string; size?: "base" 
             a: ({ href, children }) => {
               const url = String(href || "");
               const txt = String(Array.isArray(children) ? children.join("") : (children ?? ""));
+
+              // If the model formatted an image or video as a link, display the media directly in chat!
+              const isVideo =
+                txt.toLowerCase().includes("video") ||
+                url.includes("/video") ||
+                url.includes("pollinations.ai/video") ||
+                /\.(webm|mp4|ogv|mov|m4v)(\?.*)?$/i.test(url) ||
+                (url.includes("upload.wikimedia.org") && (url.includes(".webm") || url.includes(".ogv") || url.includes(".mp4")));
+
+              const isImage =
+                !isVideo && (
+                  url.includes("image.pollinations.ai") ||
+                  /\.(png|jpe?g|gif|webp|svg|avif)(\?.*)?$/i.test(url) ||
+                  url.includes("picsum.photos") ||
+                  url.includes("unsplash.com")
+                );
+
+              if (isVideo) {
+                return <SafeVideo src={url} alt={txt || "Generated Video"} />;
+              }
+
+              if (isImage) {
+                return <SafeImage src={url} alt={txt || "Generated Image"} />;
+              }
+
               const isRawUrl = /^https?:\/\//i.test(txt);
               const label = isRawUrl || !txt.trim() ? prettyHost(url) : txt;
               return (
@@ -322,7 +393,19 @@ export function RichText({ text, size = "base" }: { text: string; size?: "base" 
             th: ({ children }) => <th className="alpha-th">{children}</th>,
             td: ({ children }) => <td className="alpha-td">{children}</td>,
             pre: (props) => <CodePre {...props} />,
-            img: ({ src, alt }) => <SafeImage src={String(src || "")} alt={String(alt || "")} />,
+            img: ({ src, alt }) => {
+              const url = String(src || "");
+              const altText = String(alt || "");
+              const isVideo =
+                altText.toLowerCase().includes("video") ||
+                url.includes("/video") ||
+                url.includes("pollinations.ai/video") ||
+                /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(url);
+              if (isVideo) {
+                return <SafeVideo src={url} alt={altText} />;
+              }
+              return <SafeImage src={url} alt={altText} />;
+            },
           }}
         >
           {text || ""}
@@ -333,6 +416,6 @@ export function RichText({ text, size = "base" }: { text: string; size?: "base" 
 }
 
 /** Backwards-compatible alias — chat surfaces import this name. */
-export function MessageContent({ text }: { text: string }) {
-  return <RichText text={text} />;
+export function MessageContent({ text, images, videos }: { text: string; images?: string[]; videos?: string[] }) {
+  return <RichText text={text} images={images} videos={videos} />;
 }

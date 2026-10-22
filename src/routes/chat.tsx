@@ -76,10 +76,14 @@ function ChatRoute() {
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
   const [micError, setMicError] = useState("");
-  const [showJump, setShowJump] = useState(false);
+  const [adaptiveScroll, setAdaptiveScroll] = useState<"up" | "down" | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastScrollTopRef = useRef(0);
+  const scrollAccumulatorRef = useRef(0);
+  const lastScrollDirectionRef = useRef<"up" | "down" | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<ParsedDocument[]>([]);
   const [task, setTask] = useState<TaskType>("auto");
   const [eyeOn, setEyeOn] = useState(false);
@@ -155,6 +159,17 @@ function ChatRoute() {
   useEffect(() => {
     scrollToBottom(true);
   }, [chat.length]);
+
+  // Auto-scroll down when Alpha is thinking or showing animations
+  useEffect(() => {
+    if (busy || (act.kind !== "idle" && act.kind !== "listening")) {
+      scrollToBottom(true);
+      // Brief delayed re-scroll to account for animation DOM expansion
+      const tm = setTimeout(() => scrollToBottom(true), 80);
+      return () => clearTimeout(tm);
+    }
+  }, [busy, act.kind]);
+
   // jump on mount
   useEffect(() => {
     setTimeout(() => scrollToBottom(false), 0);
@@ -170,7 +185,52 @@ function ChatRoute() {
   function onScroll() {
     const el = scrollRef.current;
     if (!el) return;
-    setShowJump(el.scrollHeight - el.scrollTop - el.clientHeight > 200);
+
+    const currentTop = el.scrollTop;
+    const scrollHeight = el.scrollHeight;
+    const clientHeight = el.clientHeight;
+    const distanceFromBottom = scrollHeight - currentTop - clientHeight;
+    const delta = currentTop - lastScrollTopRef.current;
+
+    // Filter out micro-jitters
+    if (Math.abs(delta) > 2) {
+      const currentDirection: "up" | "down" = delta < 0 ? "up" : "down";
+
+      if (currentDirection === lastScrollDirectionRef.current) {
+        scrollAccumulatorRef.current += Math.abs(delta);
+      } else {
+        lastScrollDirectionRef.current = currentDirection;
+        scrollAccumulatorRef.current = Math.abs(delta);
+      }
+
+      // Past a few texts / lines (threshold ~80px)
+      if (scrollAccumulatorRef.current > 80) {
+        if (currentDirection === "up") {
+          // If user is attempting to scroll up and not already right at the top
+          if (currentTop > 60) {
+            setAdaptiveScroll("up");
+          } else {
+            setAdaptiveScroll(null);
+          }
+        } else {
+          // User is attempting to scroll down and not already at the bottom
+          if (distanceFromBottom > 100) {
+            setAdaptiveScroll("down");
+          } else {
+            setAdaptiveScroll(null);
+          }
+        }
+      }
+    }
+
+    // Boundary checks: automatically disappear if at or very near edges
+    if (currentTop <= 30 && adaptiveScroll === "up") {
+      setAdaptiveScroll(null);
+    } else if (distanceFromBottom <= 50 && adaptiveScroll === "down") {
+      setAdaptiveScroll(null);
+    }
+
+    lastScrollTopRef.current = currentTop;
   }
 
   /** Regenerate an assistant reply: drop it, then re-send the user turn. */
@@ -238,7 +298,7 @@ function ChatRoute() {
       await alphaStore.appendChat({ id: uid(), role: "model", text: reply, ts: Date.now() });
       speakWith(reply, { auto: true });
     } catch (e: any) {
-      if (e?.name === "AbortError" || e?.message?.includes("aborted")) {
+      if (e?.name === "AbortError" || /aborted/i.test(e?.message || "")) {
         return;
       }
       await alphaStore.appendChat({
@@ -320,7 +380,7 @@ function ChatRoute() {
         <header className="glass border-b border-primary/20 shrink-0 z-30">
           <div className="grid grid-cols-[88px_1fr_88px] items-center gap-2 px-3 py-3 relative">
             <div className="flex items-center gap-1.5 min-w-0 justify-start">
-              <Link to="/" aria-label="Back" className="p-1.5 rounded-full glass neon-border">
+              <Link to="/" aria-label="Back" className="p-1.5 rounded-full bg-background/80 border border-primary/40 backdrop-blur-md active:scale-95 transition-all hover:border-primary/70">
                 <ArrowLeft className="w-4 h-4 text-primary" />
               </Link>
               <LiveClock className="text-left text-[10px] [&_.font-mono]:tracking-wide" />
@@ -331,7 +391,7 @@ function ChatRoute() {
             <div className="flex items-center gap-1.5 min-w-0 justify-end">
               <button
                 onClick={() => alphaStore.clearChat()}
-                className="text-[10px] text-muted-foreground px-1.5 hover:text-foreground"
+                className="text-[10px] text-muted-foreground px-2 py-0.5 rounded-full border border-primary/30 hover:border-primary/60 hover:text-foreground transition-all"
               >
                 Clear
               </button>
@@ -452,7 +512,7 @@ function ChatRoute() {
                 {m.images?.map((src, i) => (
                   <img key={i} src={src} className="rounded-lg max-h-60 mb-2 max-w-full" alt="" />
                 ))}
-                <MessageContent text={m.text} />
+                <MessageContent text={m.text} images={m.images} videos={m.videos} />
                 <MessageActions
                   text={m.text}
                   onDelete={() => alphaStore.deleteChatMessage(m.id)}
@@ -474,26 +534,7 @@ function ChatRoute() {
           )}
         </div>
 
-        {showJump && (
-          <div
-            className="fixed right-3 top-28 z-40 flex flex-col gap-2"
-          >
-            <button
-              onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
-              aria-label="Top"
-              className="glass rounded-full p-2 neon-border active:scale-95 opacity-90 shadow-md backdrop-blur-md"
-            >
-              <ArrowUp className="w-4 h-4 text-primary" />
-            </button>
-            <button
-              onClick={() => scrollToBottom(true)}
-              aria-label="Bottom"
-              className="glass rounded-full p-2 neon-border active:scale-95 shadow-md backdrop-blur-md"
-            >
-              <ArrowDown className="w-4 h-4 text-primary" />
-            </button>
-          </div>
-        )}
+
 
         {images.length > 0 && (
           <div className="px-3 pb-2 flex gap-2 overflow-x-auto">
@@ -536,6 +577,30 @@ function ChatRoute() {
         )}
 
         <div className="p-3 glass border-t border-primary/20 relative shrink-0 z-20">
+          {/* Adaptive single scroll button: Centered cleanly above composer bar (hidden when Alpha is responding or animating) */}
+          {adaptiveScroll && !busy && (act.kind === "idle" || act.kind === "listening") && (
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 pointer-events-none z-30">
+              <button
+                onClick={() => {
+                  if (adaptiveScroll === "up") {
+                    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                  } else {
+                    scrollToBottom(true);
+                  }
+                  setAdaptiveScroll(null);
+                }}
+                aria-label={adaptiveScroll === "up" ? "Scroll to top" : "Scroll to bottom"}
+                className="pointer-events-auto rounded-full p-2.5 active:scale-95 shadow-xl transition-all duration-200 hover:scale-110 flex items-center justify-center bg-background/95 text-primary border border-primary/40 backdrop-blur-md"
+              >
+                {adaptiveScroll === "up" ? (
+                  <ArrowUp className="w-4 h-4 text-primary animate-bounce" />
+                ) : (
+                  <ArrowDown className="w-4 h-4 text-primary animate-bounce" />
+                )}
+              </button>
+            </div>
+          )}
+
           {toolsOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setToolsOpen(false)} />
@@ -561,23 +626,70 @@ function ChatRoute() {
               Live Eye on — just point and ask ("what's on my head?")
             </div>
           )}
-          <div className="mb-2 flex items-center gap-1.5 overflow-x-auto">
+          <div className="mb-2 relative flex items-center gap-2">
+            {/* Thunder / Lightning icon */}
             <Zap className="w-3.5 h-3.5 text-primary shrink-0" />
-            {(["auto", "fast", "thinking", "coding"] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTask(t)}
-                className={`text-[10px] px-2 py-0.5 rounded-full border whitespace-nowrap ${task === t ? "bg-primary text-primary-foreground border-primary" : "glass neon-border text-muted-foreground"}`}
-              >
-                {t === "auto"
+
+            {/* Mode toggle button: black inside, black text, thin border */}
+            <button
+              onClick={() => setModeMenuOpen((v) => !v)}
+              className="text-[11px] font-semibold px-3 py-1 rounded-full bg-black text-black border border-primary/40 hover:border-primary transition-all active:scale-95 shadow-sm"
+              title="Toggle Mode options"
+            >
+              Mode
+            </button>
+
+            {/* Current mode display (NOT a button, indicates running mode): black inside, blue words */}
+            <div
+              className="text-[11px] font-mono px-3 py-1 rounded-full bg-black text-primary border border-primary/40 select-none shadow-sm flex items-center gap-1.5"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              <span>
+                {task === "auto"
                   ? "Auto"
-                  : t === "fast"
+                  : task === "fast"
                     ? "⚡ Fast"
-                    : t === "thinking"
+                    : task === "thinking"
                       ? "🧠 Deep"
                       : "🛠 Code"}
-              </button>
-            ))}
+              </span>
+            </div>
+
+            {/* Stacked dropdown for Mode options */}
+            {modeMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-30"
+                  onClick={() => setModeMenuOpen(false)}
+                />
+                <div className="absolute bottom-full left-5 mb-2 z-40 rounded-2xl p-1.5 flex flex-col gap-1 min-w-[130px] shadow-2xl bg-black/95 border border-primary/40 backdrop-blur-md animate-fade-in">
+                  {(
+                    [
+                      { key: "auto", label: "Auto" },
+                      { key: "fast", label: "⚡ Fast" },
+                      { key: "thinking", label: "🧠 Deep" },
+                      { key: "coding", label: "🛠 Code" },
+                    ] as const
+                  ).map((m) => (
+                    <button
+                      key={m.key}
+                      onClick={() => {
+                        setTask(m.key);
+                        setModeMenuOpen(false);
+                      }}
+                      className={`text-left text-xs px-3 py-1.5 rounded-xl transition-all font-medium flex items-center justify-between ${
+                        task === m.key
+                          ? "bg-primary/20 text-primary border border-primary/40 shadow-sm"
+                          : "text-primary/80 hover:text-primary hover:bg-primary/10"
+                      }`}
+                    >
+                      <span>{m.label}</span>
+                      {task === m.key && <span className="text-[10px] text-primary">●</span>}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
           {/* Composer: full-width growing textarea, all controls docked on the left row below */}
           <div className="flex flex-col gap-2">
@@ -591,10 +703,10 @@ function ChatRoute() {
               onInput={autoGrow}
               placeholder="Message Alpha…"
               rows={2}
-              className="w-full min-w-0 bg-input rounded-2xl px-4 py-3 border border-border outline-none focus:border-primary resize-none min-h-[56px] max-h-44 overflow-y-auto text-base leading-6 break-words [overflow-wrap:anywhere]"
+              className="w-full min-w-0 bg-input rounded-2xl px-4 py-3 border border-border/40 outline-none focus:border-primary focus:ring-1 focus:ring-primary/40 resize-none min-h-[56px] max-h-44 overflow-y-auto text-base leading-6 break-words [overflow-wrap:anywhere] transition-colors"
             />
             <div className="flex items-center gap-1.5">
-              {/* Item 1: Burger menu for tools */}
+              {/* Item 1: Burger menu for tools (restored without outer ring) */}
               <button
                 onClick={() => {
                   setToolsOpen((v) => !v);
@@ -614,7 +726,7 @@ function ChatRoute() {
                     setAttachmentsOpen((v) => !v);
                     setToolsOpen(false);
                   }}
-                  className={`p-2 rounded-lg glass shrink-0 transition-colors ${attachmentsOpen || attachedFiles.length > 0 || images.length > 0 ? "border-primary text-primary" : "text-primary hover:text-primary/80"}`}
+                  className={`p-2 rounded-xl bg-background/80 border border-primary/40 backdrop-blur-md shrink-0 transition-all active:scale-95 ${attachmentsOpen || attachedFiles.length > 0 || images.length > 0 ? "border-primary text-primary shadow-[0_0_10px_rgba(59,130,246,0.5)]" : "text-primary hover:border-primary/70 hover:text-primary/90"}`}
                   aria-label="Attach File, Image, or Camera"
                   title="Attach File, Image, or Camera"
                 >
@@ -627,11 +739,12 @@ function ChatRoute() {
                       className="fixed inset-0 z-30"
                       onClick={() => setAttachmentsOpen(false)}
                     />
-                    <div className="absolute bottom-full left-0 mb-2 z-40 glass neon-border rounded-2xl p-1.5 flex flex-col gap-1 min-w-[210px] shadow-2xl bg-background/95 border border-primary/30 backdrop-blur-md animate-fade-in">
+                    {/* Attachment menu: blocky grid identical to the burger tools popup layout */}
+                    <div className="absolute bottom-full left-0 mb-2 z-40 glass neon-border rounded-2xl p-2 grid grid-cols-4 gap-2 min-w-[280px]">
                       {/* 1. Upload Image */}
-                      <label className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-primary/15 cursor-pointer text-xs text-foreground transition-colors">
-                        <ImagePlus className="w-4 h-4 text-primary" />
-                        <span>Upload Image</span>
+                      <label className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer">
+                        <ImagePlus className="w-5 h-5 text-primary" />
+                        <span className="text-[10px] text-foreground/80">Upload</span>
                         <input
                           type="file"
                           accept="image/*"
@@ -645,9 +758,9 @@ function ChatRoute() {
                       </label>
 
                       {/* 2. Take Photo */}
-                      <label className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-primary/15 cursor-pointer text-xs text-foreground transition-colors">
-                        <Camera className="w-4 h-4 text-primary" />
-                        <span>Take Photo</span>
+                      <label className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer">
+                        <Camera className="w-5 h-5 text-primary" />
+                        <span className="text-[10px] text-foreground/80">Photo</span>
                         <input
                           type="file"
                           accept="image/*"
@@ -666,16 +779,16 @@ function ChatRoute() {
                           toggleEye();
                           setAttachmentsOpen(false);
                         }}
-                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-primary/15 cursor-pointer text-xs text-foreground transition-colors text-left"
+                        className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer"
                       >
-                        {eyeOn ? <EyeOff className="w-4 h-4 text-destructive" /> : <Eye className="w-4 h-4 text-primary" />}
-                        <span>{eyeOn ? "Stop Live Eye" : "Live Cyber-Eye"}</span>
+                        {eyeOn ? <EyeOff className="w-5 h-5 text-destructive" /> : <Eye className="w-5 h-5 text-primary" />}
+                        <span className="text-[10px] text-foreground/80">{eyeOn ? "Stop Eye" : "Live Eye"}</span>
                       </button>
 
-                      {/* 4. Attach Document / File */}
-                      <label className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-primary/15 cursor-pointer text-xs text-foreground transition-colors">
-                        <FileText className="w-4 h-4 text-primary" />
-                        <span>Attach Document (.pdf, .docx, .txt...)</span>
+                      {/* 4. Attach File */}
+                      <label className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer">
+                        <FileText className="w-5 h-5 text-primary" />
+                        <span className="text-[10px] text-foreground/80">File</span>
                         <input
                           type="file"
                           accept=".pdf,.docx,.doc,.txt,.md,.csv,.json,.py,.ts,.js,.html"
@@ -695,7 +808,7 @@ function ChatRoute() {
               <div className="ml-auto flex items-center gap-1.5 shrink-0">
                 <button
                   onClick={toggleMic}
-                  className="p-2 rounded-lg glass"
+                  className="p-2 rounded-xl bg-background/80 border border-primary/40 backdrop-blur-md transition-all active:scale-95 hover:border-primary/70"
                   aria-label="Microphone"
                 >
                   {listening ? (
@@ -707,7 +820,7 @@ function ChatRoute() {
                 {busy ? (
                   <button
                     onClick={stopCurrentProcess}
-                    className="p-2.5 rounded-xl bg-black border border-black hover:bg-black/90 transition-all active:scale-95 shadow-none"
+                    className="p-2.5 rounded-xl bg-black border border-primary/50 hover:border-primary hover:bg-black/90 transition-all active:scale-95 shadow-none"
                     aria-label="Stop Generation"
                     title="Stop process"
                   >
@@ -717,10 +830,10 @@ function ChatRoute() {
                   <button
                     onClick={() => send()}
                     disabled={busy || busyRef.current || (!(text || "").trim() && images.length === 0 && attachedFiles.length === 0)}
-                    className="p-2.5 rounded-xl bg-primary text-primary-foreground neon-border disabled:opacity-50"
+                    className="p-2.5 rounded-xl bg-black border border-primary/50 hover:border-primary text-primary transition-all active:scale-95 disabled:opacity-50"
                     aria-label="Send"
                   >
-                    <Send className="w-5 h-5" />
+                    <Send className="w-5 h-5 text-primary" />
                   </button>
                 )}
               </div>
@@ -732,3 +845,5 @@ function ChatRoute() {
   );
 }
 
+
+export default ChatRoute;

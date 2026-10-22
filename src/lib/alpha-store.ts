@@ -31,6 +31,7 @@ export interface ChatMessage {
   text: string;
   name?: string;
   images?: string[];
+  videos?: string[];
   attachments?: ChatAttachment[];
   ts: number;
   error?: boolean;

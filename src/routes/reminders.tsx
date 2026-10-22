@@ -174,3 +174,4 @@ function RemindersRoute() {
     </div>
   );
 }
+export default RemindersRoute;

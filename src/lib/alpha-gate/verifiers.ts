@@ -9,15 +9,36 @@ import type { RequestActionLifecycle } from "../request-lifecycle";
 import type { AlphaGateActionStatus, DeferredProseBlock, NativeToolExecutionSummary } from "./types";
 
 /**
- * Strips reasoning tags and scratchpads while strictly preserving legitimate user/model prose.
+ * Strips reasoning tags, scratchpads, tokenizer special tokens (<unk>, <|...|>, <｜...｜>),
+ * and internal CoT preamble scratchpads while strictly preserving legitimate user/model prose.
  */
 export function stripReasoningAndScratchpads(input: string): { text: string; stripped: boolean } {
   if (!input) return { text: "", stripped: false };
 
   const initial = input;
-  let text = stripLeakedThinking(input);
+  let text = input;
 
-  // Additional defense for isolated XML tags if any survived
+  // 1. If output contains assistant prompt markers like `<｜begin of sentence|>assistant` or `<|channel|>assistant<|message|>`,
+  // extract ONLY the final assistant reply text and discard any preceding internal CoT scratchpad.
+  const assistantMarkers = [
+    /<[|｜]begin[▁_ ]of[▁_ ]sentence[|｜]>assistant(?:<[|｜][^>]+[|｜]>)*([\s\S]*)$/i,
+    /<[|｜]channel[|｜]>assistant<[|｜]message[|｜]>([\s\S]*)$/i,
+    /<[|｜](?:start_header_id|start_header)[|｜]>assistant<[|｜](?:end_header_id|end_header)[|｜]>([\s\S]*)$/i,
+    /<[|｜]assistant[|｜]>([\s\S]*)$/i,
+  ];
+
+  for (const rx of assistantMarkers) {
+    const match = text.match(rx);
+    if (match && match[1]) {
+      text = match[1];
+      break;
+    }
+  }
+
+  // 2. Pass through openai-compat stripLeakedThinking
+  text = stripLeakedThinking(text);
+
+  // 3. Additional defense for isolated XML tags if any survived
   const tags = [
     "think",
     "thinking",
@@ -32,6 +53,16 @@ export function stripReasoningAndScratchpads(input: string): { text: string; str
     const rx = new RegExp(`<${tag}>[\\s\\S]*?<\\/${tag}>`, "gi");
     text = text.replace(rx, "");
   }
+
+  // 4. Strip unclosed chain-of-thought preambles at the start of text (e.g. "We need to answer: ... We need to see if ...")
+  // if followed by a clear response header like "## " or similar
+  const cotPreambleRx = /^(?:We need to answer|The user is asking|Thinking Process|Let's check the context|Let's analyze)[\s\S]*?(?=\n\s*#{1,6}\s+|\n\s*(?:Based on|According to|Here is|In summary))/i;
+  text = text.replace(cotPreambleRx, "");
+
+  // 5. Strip tokenizer raw special tokens and unknown token artifacts:
+  // e.g. <unk>, <|endoftext|>, <｜begin▁of▁sentence|>, <|im_start|>, <|im_end|>, etc.
+  text = text.replace(/<(?:unk|s|\/s|pad)>/gi, "");
+  text = text.replace(/<[|｜][^>]+[|｜]>/g, "");
 
   const stripped = text.trim() !== initial.trim();
   return { text: text.trim(), stripped };
@@ -570,14 +601,14 @@ export function verifyAndReconcileSources(
     }
   }
 
-  if (citedNumbers.size === 0) {
-    return { text: cleanBody, filtered: hadSourcesSection || sanitized.modified };
-  }
-
-  const validCited = [...citedNumbers]
-    .filter((n) => sourcesMap.has(n))
+  const validCited = (citedNumbers.size > 0
+    ? [...citedNumbers].filter((n) => sourcesMap.has(n))
+    : Array.from(sourcesMap.keys())
+  )
     .sort((a, b) => a - b)
-    .map((n) => sourcesMap.get(n)!);
+    .slice(0, 5)
+    .map((n) => sourcesMap.get(n)!)
+    .filter(Boolean);
 
   if (validCited.length === 0) {
     return { text: cleanBody, filtered: hadSourcesSection || sanitized.modified };
@@ -588,3 +619,71 @@ export function verifyAndReconcileSources(
   const filtered = hadSourcesSection || sanitized.modified || resultText !== input;
   return { text: resultText, filtered };
 }
+
+/**
+ * Aggressively detects and strips raw tool execution strings, prompts, and status messages
+ * (e.g. generate;image, ✅️ generateimage complete, tool_call_id, JSON blobs) from model output.
+ */
+export function stripToolLeakage(input: string): { text: string; stripped: boolean } {
+  if (!input) return { text: "", stripped: false };
+
+  let text = input;
+  const initial = input;
+
+  // 1. Strip raw tool invocation patterns like `generate;image`, `generateImage(prompt: ...)`, `tool_call: ...`
+  const toolSignatures = [
+    /^(?:generate|call|exec|tool|action)[;\s_-]+(?:image|video|search|reminder|note|music|tool)[^\n]*$/gim,
+    /\b(?:generateImage|generateVideo|webSearch|createReminder|addNote)\s*\([^)]*\)/gim,
+    /\b(?:tool_call_id|tool_call|function_call|arguments)\s*[:=]\s*[^\n]+/gim,
+    /\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{[^}]+\}\s*\}/gim,
+    /\[?✅️?\s*(?:generateimage|generatevideo|search|reminder)\s+complete\]?/gim,
+    /^(?:Status|Result|Tool Result)\s*:\s*(?:success|completed|true|false)\b/gim,
+  ];
+
+  for (const rx of toolSignatures) {
+    text = text.replace(rx, "");
+  }
+
+  // 2. If the text consists solely of raw status or code/json artifacts, replace with clean default
+  const cleaned = text.trim();
+  if (
+    !cleaned ||
+    /^\{[\s\S]*\}$/.test(cleaned) ||
+    /^\[[\s\S]*\]$/.test(cleaned) ||
+    /^(?:success|true|false|completed|done)\.?$/i.test(cleaned)
+  ) {
+    return {
+      text: "Here is the result you requested:",
+      stripped: true,
+    };
+  }
+
+  return { text: cleaned, stripped: cleaned !== initial.trim() };
+}
+
+/**
+ * Detects and strips accidental system prompt echoes (e.g. "USER: You are talking to Alex")
+ * at the start of a response while strictly protecting intentional user requests (code, files, grammar).
+ */
+export function stripSystemPromptEchoes(input: string): { text: string; stripped: boolean } {
+  if (!input) return { text: "", stripped: false };
+
+  let text = input;
+  const initial = input;
+
+  // Detect accidental system prefix echoes at the start of the response
+  const echoPatterns = [
+    /^(?:USER|SYSTEM|ASSISTANT)\s*:\s*(?:You are talking to[^\n]+\.?\s*)+/gim,
+    /^You are talking to [A-Za-z]+[^\n]*\.\s*/gim,
+    /^Live user data snapshot[^\n]*\n+/gim,
+  ];
+
+  for (const rx of echoPatterns) {
+    text = text.replace(rx, "");
+  }
+
+  const stripped = text.trim() !== initial.trim();
+  return { text: text.trim(), stripped };
+}
+
+

@@ -39,6 +39,10 @@ export type ActivityKind =
   | "preparing_voice"
   | "speaking"
   | "stopping_speech"
+  | "generating_image"
+  | "generating_video"
+  | "generating_music"
+  | "generating_tts"
   | "action_failed"
   | "error";
 
@@ -73,6 +77,10 @@ const LABELS: Record<ActivityKind, string> = {
   preparing_voice: "Preparing voice…",
   speaking: "Speaking…",
   stopping_speech: "Stopping speech…",
+  generating_image: "Generating image…",
+  generating_video: "Generating video…",
+  generating_music: "Composing AI music…",
+  generating_tts: "Generating voice…",
   action_failed: "Action failed",
   error: "Error",
 };
@@ -90,6 +98,10 @@ export const ACTION_ACTIVITY_KINDS: ReadonlySet<ActivityKind> = new Set<Activity
   "executing_action",
   "action_failed",
   "writing_code",
+  "generating_image",
+  "generating_video",
+  "generating_music",
+  "generating_tts",
 ]);
 
 export interface Activity {

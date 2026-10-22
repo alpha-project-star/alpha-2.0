@@ -66,7 +66,7 @@ export function SessionDrawer({ className = "" }: SessionDrawerProps) {
       {/* Trigger Button */}
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg glass neon-border text-xs text-foreground/80 hover:text-foreground hover:border-primary/50 transition-all active:scale-95 group"
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-background/85 border border-primary/40 backdrop-blur-md text-xs text-foreground/90 hover:text-foreground hover:border-primary/70 transition-all active:scale-95 group shadow-sm"
         title="Chat Sessions & History"
       >
         <History className="w-3.5 h-3.5 text-primary group-hover:rotate-[-20deg] transition-transform" />

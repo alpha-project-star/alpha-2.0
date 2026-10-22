@@ -55,6 +55,7 @@ export function DesktopChatPanel() {
   const [showJump, setShowJump] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [task, setTask] = useState<TaskType>("auto");
   const [eyeOn, setEyeOn] = useState(false);
   const [eyeError, setEyeError] = useState("");
@@ -120,6 +121,16 @@ export function DesktopChatPanel() {
   useEffect(() => {
     scrollToBottom(true);
   }, [chat.length]);
+
+  // Auto-scroll down when Alpha is thinking or showing animations
+  useEffect(() => {
+    if (busy || (act.kind !== "idle" && act.kind !== "listening")) {
+      scrollToBottom(true);
+      const tm = setTimeout(() => scrollToBottom(true), 80);
+      return () => clearTimeout(tm);
+    }
+  }, [busy, act.kind]);
+
   useEffect(() => {
     setTimeout(() => scrollToBottom(false), 0);
   }, []);
@@ -331,7 +342,7 @@ export function DesktopChatPanel() {
                 <img key={i} src={src} className="rounded-lg max-h-40 mb-2 max-w-full" alt="" />
               ))}
               {m.role === "model" ? (
-                <MessageContent text={m.text} />
+                <MessageContent text={m.text} images={m.images} videos={m.videos} />
               ) : (
                 <div className="whitespace-pre-wrap">{m.text}</div>
               )}
@@ -444,23 +455,67 @@ export function DesktopChatPanel() {
         </div>
       )}
 
-      <div className="pt-2 flex items-center gap-1.5 overflow-x-auto">
+      <div className="pt-2 relative flex items-center gap-2">
         <Zap className="w-3.5 h-3.5 text-primary shrink-0" />
-        {(["auto", "fast", "thinking", "coding"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTask(t)}
-            className={`text-[10px] px-2 py-0.5 rounded-full border whitespace-nowrap ${task === t ? "bg-primary text-primary-foreground border-primary" : "hud-bubble text-muted-foreground"}`}
-          >
-            {t === "auto"
+
+        {/* Mode toggle button */}
+        <button
+          onClick={() => setModeMenuOpen((v) => !v)}
+          className="text-[11px] font-semibold px-3 py-1 rounded-full bg-black text-black border border-primary/40 hover:border-primary transition-all active:scale-95 shadow-sm"
+          title="Toggle Mode options"
+        >
+          Mode
+        </button>
+
+        {/* Current mode display (NOT a button) */}
+        <div className="text-[11px] font-mono px-3 py-1 rounded-full bg-black text-primary border border-primary/40 select-none shadow-sm flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+          <span>
+            {task === "auto"
               ? "Auto"
-              : t === "fast"
+              : task === "fast"
                 ? "⚡ Fast"
-                : t === "thinking"
+                : task === "thinking"
                   ? "🧠 Deep"
                   : "🛠 Code"}
-          </button>
-        ))}
+          </span>
+        </div>
+
+        {/* Stacked dropdown for Mode options */}
+        {modeMenuOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-30"
+              onClick={() => setModeMenuOpen(false)}
+            />
+            <div className="absolute bottom-full left-5 mb-2 z-40 rounded-2xl p-1.5 flex flex-col gap-1 min-w-[130px] shadow-2xl bg-black/95 border border-primary/40 backdrop-blur-md animate-fade-in">
+              {(
+                [
+                  { key: "auto", label: "Auto" },
+                  { key: "fast", label: "⚡ Fast" },
+                  { key: "thinking", label: "🧠 Deep" },
+                  { key: "coding", label: "🛠 Code" },
+                ] as const
+              ).map((m) => (
+                <button
+                  key={m.key}
+                  onClick={() => {
+                    setTask(m.key);
+                    setModeMenuOpen(false);
+                  }}
+                  className={`text-left text-xs px-3 py-1.5 rounded-xl transition-all font-medium flex items-center justify-between ${
+                    task === m.key
+                      ? "bg-primary/20 text-primary border border-primary/40 shadow-sm"
+                      : "text-primary/80 hover:text-primary hover:bg-primary/10"
+                  }`}
+                >
+                  <span>{m.label}</span>
+                  {task === m.key && <span className="text-[10px] text-primary">●</span>}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
       <div className="pt-2 flex flex-col gap-2 relative">
         <textarea
@@ -470,10 +525,10 @@ export function DesktopChatPanel() {
           onInput={autoGrow}
           placeholder="Message Alpha…"
           rows={2}
-          className="w-full min-w-0 bg-input/60 rounded-2xl px-4 py-3 border border-primary/40 outline-none focus:border-primary resize-none min-h-[56px] max-h-44 overflow-y-auto text-sm leading-6 break-words [overflow-wrap:anywhere]"
+          className="w-full min-w-0 bg-input/60 rounded-2xl px-4 py-3 border border-border/40 outline-none focus:border-primary focus:ring-1 focus:ring-primary/40 resize-none min-h-[56px] max-h-44 overflow-y-auto text-sm leading-6 break-words [overflow-wrap:anywhere] transition-colors"
         />
         <div className="flex items-center gap-1.5">
-          {/* Item 1: Burger icon for tools menu */}
+          {/* Item 1: Burger icon for tools menu (restored) */}
           <button
             onClick={() => {
               setToolsOpen((v) => !v);
@@ -493,7 +548,7 @@ export function DesktopChatPanel() {
                 setAttachmentsOpen((v) => !v);
                 setToolsOpen(false);
               }}
-              className={`p-2 rounded-lg hud-bubble shrink-0 transition-colors ${attachmentsOpen || attachedFiles.length > 0 || images.length > 0 ? "border-primary text-primary" : "text-primary hover:text-primary/80"}`}
+              className={`p-2 rounded-xl bg-background/80 border border-primary/40 backdrop-blur-md shrink-0 transition-all active:scale-95 ${attachmentsOpen || attachedFiles.length > 0 || images.length > 0 ? "border-primary text-primary shadow-[0_0_10px_rgba(59,130,246,0.5)]" : "text-primary hover:border-primary/70 hover:text-primary/90"}`}
               aria-label="Attach File, Image, or Camera"
               title="Attach File, Image, or Camera"
             >
@@ -506,10 +561,10 @@ export function DesktopChatPanel() {
                   className="fixed inset-0 z-30"
                   onClick={() => setAttachmentsOpen(false)}
                 />
-                <div className="absolute bottom-full left-0 mb-2 z-40 glass neon-border rounded-2xl p-1.5 flex flex-col gap-1 min-w-[210px] shadow-2xl bg-background/95 border border-primary/30 backdrop-blur-md animate-fade-in">
-                  <label className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-primary/15 cursor-pointer text-xs text-foreground transition-colors">
-                    <ImagePlus className="w-4 h-4 text-primary" />
-                    <span>Upload Image</span>
+                <div className="absolute bottom-full left-0 mb-2 z-40 glass neon-border rounded-2xl p-2 grid grid-cols-4 gap-2 min-w-[280px]">
+                  <label className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer">
+                    <ImagePlus className="w-5 h-5 text-primary" />
+                    <span className="text-[10px] text-foreground/80">Upload</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -522,9 +577,9 @@ export function DesktopChatPanel() {
                     />
                   </label>
 
-                  <label className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-primary/15 cursor-pointer text-xs text-foreground transition-colors">
-                    <Camera className="w-4 h-4 text-primary" />
-                    <span>Take Photo</span>
+                  <label className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer">
+                    <Camera className="w-5 h-5 text-primary" />
+                    <span className="text-[10px] text-foreground/80">Photo</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -542,15 +597,15 @@ export function DesktopChatPanel() {
                       toggleEye();
                       setAttachmentsOpen(false);
                     }}
-                    className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-primary/15 cursor-pointer text-xs text-foreground transition-colors text-left"
+                    className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer"
                   >
-                    {eyeOn ? <EyeOff className="w-4 h-4 text-destructive" /> : <Eye className="w-4 h-4 text-primary" />}
-                    <span>{eyeOn ? "Stop Live Eye" : "Live Cyber-Eye"}</span>
+                    {eyeOn ? <EyeOff className="w-5 h-5 text-destructive" /> : <Eye className="w-5 h-5 text-primary" />}
+                    <span className="text-[10px] text-foreground/80">{eyeOn ? "Stop Eye" : "Live Eye"}</span>
                   </button>
 
-                  <label className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-primary/15 cursor-pointer text-xs text-foreground transition-colors">
-                    <FileText className="w-4 h-4 text-primary" />
-                    <span>Attach Document (.pdf, .docx, .txt...)</span>
+                  <label className="flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl bg-background/40 active:scale-95 cursor-pointer">
+                    <FileText className="w-5 h-5 text-primary" />
+                    <span className="text-[10px] text-foreground/80">File</span>
                     <input
                       type="file"
                       accept=".pdf,.docx,.doc,.txt,.md,.csv,.json,.py,.ts,.js,.html"
@@ -571,7 +626,7 @@ export function DesktopChatPanel() {
             {busy ? (
               <button
                 onClick={stopCurrentProcess}
-                className="p-2.5 rounded-xl bg-black border border-black hover:bg-black/90 transition-all active:scale-95 shadow-none"
+                className="p-2.5 rounded-xl bg-black border border-primary/50 hover:border-primary hover:bg-black/90 transition-all active:scale-95 shadow-none"
                 aria-label="Stop Generation"
                 title="Stop process"
               >
@@ -581,10 +636,10 @@ export function DesktopChatPanel() {
               <button
                 onClick={() => send()}
                 disabled={busy || busyRef.current || (!(text || "").trim() && images.length === 0 && attachedFiles.length === 0)}
-                className="p-2.5 rounded-xl bg-primary text-primary-foreground neon-border disabled:opacity-50 shrink-0"
+                className="p-2.5 rounded-xl bg-black border border-primary/50 hover:border-primary text-primary transition-all active:scale-95 disabled:opacity-50 shrink-0"
                 aria-label="Send"
               >
-                <Send className="w-5 h-5" />
+                <Send className="w-5 h-5 text-primary" />
               </button>
             )}
           </div>

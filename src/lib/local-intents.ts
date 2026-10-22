@@ -1,6 +1,7 @@
 import { alphaStore, uid } from "./alpha-store";
 import { trySettingsIntent } from "./settings-intents";
 import { playMusicByName, stopMusic, playNextTrack, playPreviousTrack } from "./music";
+import { generateImageServer, generateVideoServer } from "./multimodal-generator";
 import { auth } from "./firebase";
 import { getReminderTool } from "./tool-registry";
 import { ensureAuthenticatedUser } from "./auth";
@@ -105,6 +106,31 @@ async function executeLocalIntent(t: string, lifecycle?: RequestActionLifecycle)
         return `I couldn't save your reminder: ${error.message}. Please try again.`;
       }
     }
+  }
+
+  // ---- MULTIMODAL VIDEO GENERATION --------------------------------------
+  const videoMatch = t.match(
+    /^(?:please\s+)?(?:generate|create|make|produce|render|animate)\s+(?:me\s+)?(?:a\s+|an\s+)?(?:short\s+)?(?:video|clip|animation|motion scene)\s+(?:of|showing|about|with)?\s*(.+)$/i
+  );
+  if (videoMatch) {
+    activity.set("generating_video");
+    const prompt = videoMatch[1].trim();
+    const result = await generateVideoServer(prompt);
+    activity.clear();
+    return `Here is the video of ${prompt} you requested:\n\n![Generated Video: ${prompt}](${result.dataUrl})`;
+  }
+
+  // ---- MULTIMODAL IMAGE GENERATION --------------------------------------
+  const imageMatch =
+    t.match(
+      /^(?:please\s+)?(?:generate|create|make|draw|paint|render)\s+(?:me\s+)?(?:a\s+|an\s+)?(?:new\s+)?(?:image|picture|photo|artwork|drawing|painting|illustration|wallpaper)\s+(?:of|showing|about|with)?\s*(.+)$/i
+    ) || t.match(/^(?:please\s+)?(?:draw|paint)\s+(?:me\s+)?(?:a\s+|an\s+)?(.+)$/i);
+  if (imageMatch) {
+    activity.set("generating_image");
+    const prompt = imageMatch[1].trim();
+    const result = await generateImageServer(prompt);
+    activity.clear();
+    return `Here is the ${result.style} image of ${prompt} you requested:\n\n![${prompt}](${result.dataUrl})`;
   }
 
   // ---- MUSIC -------------------------------------------------------------

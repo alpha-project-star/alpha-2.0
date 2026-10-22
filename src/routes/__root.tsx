@@ -154,3 +154,5 @@ function AppContent() {
     </AlphaLock>
   );
 }
+
+export default RootComponent;

@@ -1,0 +1,6 @@
+{
+  "summary":  "Implementation plan addressing the 8 UI/UX fixes:\n1. Prompt box border behavior: dark grey at rest, neon blue highlight on tap/focus.\n2. Send & Stop buttons: Send has black interior, blue circumference ring, and blue Send icon; Stop button gets matching blue outer ring.\n3. Burger menu popup: Revert tools buttons back to original glass style without individual blue rings.\n4. Auto scroll down: Automatically scroll to bottom during assistant thinking/animation.\n5. Adaptive scroll button: Hide while Alpha is running a response or animating.\n6 & 7. Modes redesign: Replaced with toggle button 'Mode' (black inside, black text) + active indicator showing current mode ('Auto', etc. with black inside, blue text), opening a stacked dropdown menu that actually changes the operational model/task mode. Keep lightning icon.\n8. Attach popup styling: Match the 4-column blocky grid layout of the burger tools popup, and shorten 'Attach Document' label to 'File'.",
+  "updatedAt":  "2026-10-21T23:45:29.007714271Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

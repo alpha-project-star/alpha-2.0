@@ -1204,3 +1204,5 @@ function TaskRow({
     </div>
   );
 }
+
+export default SettingsRoute;

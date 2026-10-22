@@ -7,6 +7,7 @@ import { handleEyeCommand } from "./vision-command";
 import { sendChatOllama } from "./ollama";
 import { sendChatOpenAICompat, stripLeakedThinking, getMonotonicTimeMs, WholeTurnTimeoutError, type ChatResponse } from "./openai-compat";
 import { inspectGitHubRepo } from "./api/github.functions";
+import { generateImageServer, generateVideoServer } from "./multimodal-generator";
 import { fetchWeather } from "./tools/weather";
 import { lookupWikipedia, lookupArxiv } from "./tools/knowledge";
 import { evaluateMathExpression } from "./tools/math-sandbox";
@@ -57,7 +58,7 @@ import { reminderContextManager } from "./reminder-context";
 import { RequestActionLifecycle } from "./request-lifecycle";
 import { notificationAcknowledgementManager } from "./notification-acknowledgement";
 import { notificationRecoveryManager } from "./notification-recovery";
-import { alphaGate, type AlphaGateCandidate } from "./alpha-gate";
+import { alphaGate, type AlphaGateCandidate, type AlphaGateOrigin, type DeferredProseBlock, ALPHA_GATE_FALLBACK_TEXT } from "./alpha-gate";
 import {
   ALPHA_IDENTITY,
   ALPHA_BEHAVIORAL_POLICY,
@@ -519,6 +520,8 @@ You are fully aware of your own toolkit inside this app:
 - GitHub Inspection — Inspect repositories, view metadata, and fetch file contents directly from GitHub.
 - File Reading & Analysis — You have an integrated file viewing and extraction capability. When a user attaches a file (PDF, Word, Text, Code, etc.), the application automatically extracts its text content and places it directly into your conversation context inside "[ATTACHED FILE: ...]" and "[END OF FILE ...]" blocks. You DO NOT need a separate tool to read these files; the data is already present in your active context. If asked whether you can read or view files, confirm affirmatively that YES, you have an integrated file-viewer and can analyze any document attached by the user.
 - Music Tool — You can play, stop, and skip music tracks stored in the user's local Alpha library. The application automatically handles music commands like "play my music", "stop music", "play next track", "play previous track", "skip this song", and "go back to previous track" via optimized local intent handlers. If the user asks about your music capabilities, confirm clearly that YOU can control their local music library. You recognize commands like "next track", "previous song", "stop the music", etc.
+- Image & Video Generation (generateImage, generateVideo) — You have active callable tools: generateImage and generateVideo. When the user asks you to generate, create, draw, produce, paint, or make an image, photo, artwork, picture, video, or animation (e.g. "generate an image of a dog", "make a video of snow falling", "create a picture of a sunset"), you MUST call generateImage({ prompt: "..." }) or generateVideo({ prompt: "..." }). You DO have the tools to create new images and videos from scratch. NEVER say you cannot generate or create images or videos.
+- CRITICAL IN-CHAT DISPLAY RULE: ALL generated images and videos MUST display directly in the user's chat message. NEVER provide a clickable text link or external hyperlink (e.g. NEVER write "You can watch it here: [link](url)" or "View here: url"). ALWAYS use Markdown media syntax with an exclamation mark: ![Description](url) for images and ![Generated Video: Description](url) for videos so they render as interactive in-chat players and visual assets.
 
 You ALWAYS have live context of the user's data and may proactively reference it when relevant.
 
@@ -898,6 +901,36 @@ export async function executeTool(call: any, context: ToolContext, signal?: Abor
       case 'evaluateMath': {
         activity.set("calling_tool");
         res = evaluateMathExpression(args.expression || args.formula || args.math || "");
+        break;
+      }
+      case 'generateImage': {
+        activity.set("generating_image");
+        const promptText = String(args.prompt || args.query || args.description || "creative visual").trim();
+        const result = await generateImageServer(promptText);
+        res = {
+          success: true,
+          data: result.dataUrl,
+          url: result.dataUrl,
+          type: "image",
+          prompt: promptText,
+          model: result.model,
+          style: result.style,
+          message: `Image generated successfully using ${result.style}: ${result.dataUrl}. The image is automatically rendered directly in the user's chat message.`
+        };
+        break;
+      }
+      case 'generateVideo': {
+        activity.set("generating_video");
+        const promptText = String(args.prompt || args.query || args.description || "cinematic scene").trim();
+        const result = await generateVideoServer(promptText);
+        res = {
+          success: true,
+          data: result.dataUrl,
+          url: result.dataUrl,
+          type: "video",
+          prompt: promptText,
+          message: `Video generated successfully: ${result.dataUrl}. The video is automatically embedded and playable directly in the user's chat player.`
+        };
         break;
       }
       case 'controlMusic': {
@@ -1342,7 +1375,7 @@ export function stopAlphaGeneration(): void {
   }
   inFlight = null;
   lastLogicalPromise = null;
-  lastLogicalKey = null;
+  lastLogicalKey = "";
   lastLogicalTime = 0;
   stopSpeaking();
   activity.clear();
@@ -1364,6 +1397,8 @@ export async function sendChat(
     throw err;
   }
 
+  const origin: AlphaGateOrigin = opts.origin ?? "model";
+
   const history = _passedHistory && _passedHistory.length > 0 ? _passedHistory : alphaStore.getCompleteHistory();
   const task: TaskType = opts.task ?? "auto";
   const key = requestKey(history, task);
@@ -1379,7 +1414,7 @@ export async function sendChat(
   } else {
     const lastUserMsg = [...history].reverse().find((m) => m.role === "user");
     const hasImages = !!lastUserMsg?.images?.length;
-    turnTimeoutMs = (hasImages || task === "vision") ? 120_000 : 90_000;
+    turnTimeoutMs = (hasImages || String(task) === "vision") ? 120_000 : 90_000;
   }
 
   const startMs = getMonotonicTimeMs();
@@ -1653,6 +1688,8 @@ export async function runChat(
       "completeReminder",
     ]);
 
+    const generatedMedia: Array<{ type: "image" | "video"; url: string; prompt: string }> = [];
+
     let currentRouteIndex = 0;
     let prov = routes[0].prov;
     let model = routes[0].model;
@@ -1691,7 +1728,7 @@ export async function runChat(
               rawText: "",
               actionResults,
               lifecycle,
-              origin,
+              origin: origin || "model",
             });
             if (gateRes.approvedText && gateRes.approvedText !== ALPHA_GATE_FALLBACK_TEXT) {
               return gateRes.approvedText;
@@ -1853,40 +1890,75 @@ export async function runChat(
           if (invocationKey) callResults.set(invocationKey, result);
           if (stableCallId) callResults.set(stableCallId, result);
 
-          if (result && result.success) {
-            if (isMutation) {
-              hasNewMutation = true;
-              const canonicalKeys = extractNativeReminderMutationKeys(
-                call.function?.name,
-                call.function?.arguments,
-                result.data,
-              );
-              for (const k of canonicalKeys) {
-                executedLogicalMutations.set(k, result);
-                logicalKeysForTool.push(k);
-              }
-              if (invocationKey) {
-                executedLogicalMutations.set(invocationKey, result);
-              }
-              lifecycle.recordSuccess({
-                opId: op.id,
-                name: call.function?.name,
-                isMutation: true,
-                result,
-                logicalKeys: canonicalKeys.length > 0 ? canonicalKeys : (logicalKey ? [logicalKey] : []),
-                executionKey: invocationKey,
-              });
-            } else {
-              hasNewRead = true;
-              lifecycle.recordSuccess({
-                opId: op.id,
-                name: call.function?.name,
-                isMutation: false,
-                result,
-                executionKey: invocationKey,
-              });
+        if (result && result.success) {
+          if (call.function?.name === 'generateImage') {
+            const mediaUrl = result.url || result.data;
+            if (mediaUrl) {
+              generatedMedia.push({ type: "image", url: mediaUrl, prompt: result.prompt || "Generated Image" });
+              assistantMsg.images = assistantMsg.images || [];
+              assistantMsg.images.push(mediaUrl);
             }
+          } else if (call.function?.name === 'generateVideo') {
+            const mediaUrl = result.url || result.data;
+            if (mediaUrl) {
+              generatedMedia.push({ type: "video", url: mediaUrl, prompt: result.prompt || "Generated Video" });
+              assistantMsg.videos = assistantMsg.videos || [];
+              assistantMsg.videos.push(mediaUrl);
+            }
+          }
+          if (isMutation) {
+            hasNewMutation = true;
+            const canonicalKeys = extractNativeReminderMutationKeys(
+              call.function?.name,
+              call.function?.arguments,
+              result.data,
+            );
+            for (const k of canonicalKeys) {
+              executedLogicalMutations.set(k, result);
+              logicalKeysForTool.push(k);
+            }
+            if (invocationKey) {
+              executedLogicalMutations.set(invocationKey, result);
+            }
+            lifecycle.recordSuccess({
+              opId: op.id,
+              name: call.function?.name,
+              isMutation: true,
+              result,
+              logicalKeys: canonicalKeys.length > 0 ? canonicalKeys : (logicalKey ? [logicalKey] : []),
+              executionKey: invocationKey,
+            });
           } else {
+            hasNewRead = true;
+            lifecycle.recordSuccess({
+              opId: op.id,
+              name: call.function?.name,
+              isMutation: false,
+              result,
+              executionKey: invocationKey,
+            });
+
+            // Preserve retrieved evidence across the integration boundary for Alpha Gate source verification
+            if ((call.function?.name === 'web_search' || call.function?.name === 'search') && typeof result?.data === 'string' && result.data.trim()) {
+              webContext = webContext ? `${webContext}\n\n${result.data}` : result.data;
+            } else if (call.function?.name === 'lookupKnowledge' && result?.success && result?.data) {
+              const kData = result.data;
+              const existingCount = (webContext.match(/^\[\d+\]/gm) || []).length;
+              if (kData.url && (kData.title || kData.summary)) {
+                const id = existingCount + 1;
+                const block = `[${id}] ${kData.title || "Knowledge Article"} - ${kData.url}\nURL: ${kData.url}\n${kData.summary || ""}`;
+                webContext = webContext ? `${webContext}\n\n${block}` : block;
+              } else if (Array.isArray(kData.results) && kData.results.length > 0) {
+                let offset = 0;
+                const blocks = kData.results.map((r: any) => {
+                  const id = existingCount + (++offset);
+                  return `[${id}] ${r.title || "Paper"} - ${r.url || ""}\nURL: ${r.url || ""}\n${r.summary || ""}`;
+                });
+                webContext = webContext ? `${webContext}\n\n${blocks.join("\n\n")}` : blocks.join("\n\n");
+              }
+            }
+          }
+        } else {
             hasFailure = true;
             if (result?.error?.code === "AMBIGUOUS" || result?.error?.code === "AMBIGUOUS_TIME") {
               lifecycle.recordClarification(result.error?.message || "Ambiguous request", call.function?.name);
@@ -2018,7 +2090,29 @@ export async function runChat(
     if (finalResponse) {
       lastAnsweredBy = routeLabel(prov, model);
       activity.set("preparing");
-      const finalText = await finalizeReply(finalResponse.finalText || "", webContext, toolSummary, { userId: currentUid, lifecycle, signal, origin, deferredProse });
+      let rawText = finalResponse.finalText || "";
+      if (/^\s*(?:web\s+)?search\s+complete\.?\s*$/i.test(rawText) || (/^[\s\S]{0,35}$/.test(rawText) && webContext)) {
+        rawText = `Here are the verified search findings based on your request:\n\n${webContext.slice(0, 1200)}`;
+      }
+      let finalText = await finalizeReply(rawText, webContext, toolSummary, { userId: currentUid, lifecycle, signal, origin, deferredProse });
+      if (generatedMedia.length > 0) {
+        for (const m of generatedMedia) {
+          const label = m.type === "video" ? `Generated Video: ${m.prompt}` : m.prompt;
+          const escapedUrl = m.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const hasImageTag = new RegExp(`!\\[[^\\]]*\\]\\(${escapedUrl}\\)`).test(finalText);
+
+          if (!hasImageTag) {
+            const linkRegex = new RegExp(`(?<!!)\\[([^\\]]*)\\]\\(${escapedUrl}\\)`, "g");
+            if (linkRegex.test(finalText)) {
+              finalText = finalText.replace(linkRegex, `![$1](${m.url})`);
+            } else if (!finalText.includes(m.url)) {
+              finalText = `${finalText.trim()}\n\n![${label}](${m.url})`;
+            } else {
+              finalText = `${finalText.trim()}\n\n![${label}](${m.url})`;
+            }
+          }
+        }
+      }
       checkTurnDeadline();
       void maybeCompactSummary(history, finalText);
       activity.clear();
@@ -2075,7 +2169,7 @@ export async function runChat(
           rawText: "",
           actionResults,
           lifecycle,
-          origin,
+          origin: origin || "model",
         });
         if (gateRes.approvedText && gateRes.approvedText !== ALPHA_GATE_FALLBACK_TEXT) {
           return gateRes.approvedText;
@@ -2181,7 +2275,7 @@ export async function finalizeReply(
     signal: options?.signal,
   });
 
-  if (gateResult.actionStatus === "all_failed" || gateResult.actionStatus === "partial_failed") {
+  if (gateResult.actionStatus === "all_failed" || gateResult.actionStatus === "partial_failure") {
     activity.set("action_failed");
   }
 
@@ -2362,8 +2456,7 @@ ${lastAssistant.slice(0, 500)}`;
         baseUrl: "https://api.groq.com/openai/v1",
         apiKey: groqKey,
         model: GROQ_EMERGENCY_MODEL,
-        temperature: 0.2,
-        max_tokens: 800,
+        maxTokens: 800,
       }
     );
 
@@ -2376,8 +2469,13 @@ ${lastAssistant.slice(0, 500)}`;
 
 export async function generateImage(
   prompt: string,
-): Promise<{ dataUrl: string; via: "pollinations" }> {
-  const seed = Math.floor(Math.random() * 1_000_000);
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true&seed=${seed}`;
-  return { dataUrl: url, via: "pollinations" };
+  stylePref?: any,
+): Promise<{ dataUrl: string; via: string; model: string; style: string }> {
+  const result = await generateImageServer(prompt, stylePref);
+  return {
+    dataUrl: result.dataUrl,
+    via: `${result.model} (${result.style})`,
+    model: result.model,
+    style: result.style,
+  };
 }

@@ -3,6 +3,7 @@ import { SearchResult, SearchProvider } from "./web-search";
 import { activity } from "./activity";
 import { extractRelevantEvidence, extractArticleLinks } from "./research-utils";
 import { rankResults, scoreCandidateLink } from "./research-ranking";
+import { lookupWikipedia } from "./tools/knowledge";
 
 export interface WebToolReceipt {
   toolSelected: boolean;
@@ -528,7 +529,11 @@ export class BoundedResearchService {
   }
 
   async research(query: string, signal?: AbortSignal): Promise<ResearchResult> {
-    if (signal?.aborted) throw new Error("Aborted");
+    if (signal?.aborted) {
+      const err = new Error("Aborted");
+      err.name = "AbortError";
+      throw err;
+    }
     const receipt: WebToolReceipt = {
       toolSelected: true,
       querySent: null,
@@ -543,9 +548,30 @@ export class BoundedResearchService {
     try {
       receipt.querySent = query;
       const rawResults = await this.provider.search(query, 10, { signal });
-      if (signal?.aborted) throw new Error("Aborted");
+      if (signal?.aborted) {
+        const err = new Error("Aborted");
+        err.name = "AbortError";
+        throw err;
+      }
       results = rankResults(rawResults, query);
       receipt.resultCount = results.length;
+
+      // Fallback to Wikipedia if primary search returns 0 results
+      if (results.length === 0 && !signal?.aborted) {
+        try {
+          const wiki = await lookupWikipedia(query);
+          if (wiki && wiki.success && wiki.url && wiki.summary) {
+            results = [{
+              title: wiki.title || query,
+              url: wiki.url,
+              snippet: wiki.summary.slice(0, 300),
+              source: "Wikipedia",
+            }];
+            receipt.resultCount = 1;
+          }
+        } catch {}
+      }
+
       if (results.length === 0) {
         receipt.status = "empty";
         return { query, results: [], articles: [], evidence: [], sources: [], status: "failed", receipt };
@@ -555,9 +581,26 @@ export class BoundedResearchService {
       if (signal?.aborted || e?.message === "Aborted") {
         throw e;
       }
-      receipt.status = "error";
-      receipt.errorClass = "provider_unavailable";
-      return { query, results: [], articles: [], evidence: [], sources: [], status: "failed", receipt };
+      // If primary provider encountered an error/timeout, try Wikipedia fallback before declaring failure
+      try {
+        const wiki = await lookupWikipedia(query);
+        if (wiki && wiki.success && wiki.url && wiki.summary) {
+          results = [{
+            title: wiki.title || query,
+            url: wiki.url,
+            snippet: wiki.summary.slice(0, 300),
+            source: "Wikipedia",
+          }];
+          receipt.resultCount = 1;
+          receipt.status = "usable";
+        }
+      } catch {}
+
+      if (results.length === 0) {
+        receipt.status = "error";
+        receipt.errorClass = "provider_unavailable";
+        return { query, results: [], articles: [], evidence: [], sources: [], status: "failed", receipt };
+      }
     }
 
     const evidence: ResearchResult["evidence"] = [];
@@ -567,7 +610,11 @@ export class BoundedResearchService {
 
     // Pass 1: Fetch and identify
     for (const result of results) {
-      if (signal?.aborted) throw new Error("Aborted");
+      if (signal?.aborted) {
+        const err = new Error("Aborted");
+        err.name = "AbortError";
+        throw err;
+      }
       if (openedPages >= this.maxPages) {
         break;
       }
@@ -577,12 +624,10 @@ export class BoundedResearchService {
       try {
         page = await this.provider.readPage(result.url, { signal });
       } catch (error: any) {
-        if (
-          signal?.aborted ||
-          error?.name === "AbortError" ||
-          error?.message === "Aborted"
-        ) {
-          throw error;
+        if (signal?.aborted) {
+          const err = new Error("Aborted");
+          err.name = "AbortError";
+          throw err;
         }
 
         page = {
@@ -652,7 +697,11 @@ export class BoundedResearchService {
     // Pass 2: Fetch specific candidate articles if we need more depth
     if (evidence.length < 3 && articleLinks.length > 0) {
       for (const link of articleLinks) {
-        if (signal?.aborted) throw new Error("Aborted");
+        if (signal?.aborted) {
+          const err = new Error("Aborted");
+          err.name = "AbortError";
+          throw err;
+        }
         if (openedPages >= 8) break;
         activity.set("reading_article");
         let page: { title: string; content: string; status: string };
@@ -660,12 +709,10 @@ export class BoundedResearchService {
         try {
           page = await this.provider.readPage(link, { signal });
         } catch (error: any) {
-          if (
-            signal?.aborted ||
-            error?.name === "AbortError" ||
-            error?.message === "Aborted"
-          ) {
-            throw error;
+          if (signal?.aborted) {
+            const err = new Error("Aborted");
+            err.name = "AbortError";
+            throw err;
           }
 
           openedPages++;

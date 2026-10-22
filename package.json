@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "npm@10.9.0",
   "scripts": {
-    "dev": "PORT=3000 NITRO_PORT=3001 vite --host 0.0.0.0 --port 3000",
+    "dev": "vite dev --port 3000 --host 0.0.0.0",
     "build": "NODE_OPTIONS=\"--max-old-space-size=4096\" vite build && (rm -rf dist && cp -r .output/public dist || mkdir -p dist) && (cp -n index.html dist/ 2>/dev/null || true)",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
@@ -15,6 +15,7 @@
     "start": "node .output/server/index.mjs"
   },
   "dependencies": {
+    "@google/genai": "^2.30.0",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -48,6 +49,7 @@
     "@tanstack/react-start": "^1.168.60",
     "@tanstack/router-plugin": "^1.168.42",
     "@testing-library/react": "^16.3.3",
+    "@types/three": "^0.186.0",
     "cfb": "^1.2.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -74,6 +76,7 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.1",
+    "three": "^0.186.1",
     "tw-animate-css": "^1.3.4",
     "vaul": "^1.1.2",
     "vite-tsconfig-paths": "^6.0.2",
