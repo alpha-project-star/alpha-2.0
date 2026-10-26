@@ -572,9 +572,13 @@ export function DesktopChatPanel() {
                       accept="image/*"
                       multiple
                       hidden
-                      onChange={(e) => {
-                        pickImages(e.target.files);
+                      onChange={async (e) => {
+                        const files = e.target.files;
+                        if (files && files.length > 0) {
+                          await pickImages(files);
+                        }
                         setAttachmentsOpen(false);
+                        e.target.value = "";
                       }}
                     />
                   </label>
@@ -587,9 +591,13 @@ export function DesktopChatPanel() {
                       accept="image/*"
                       capture="environment"
                       hidden
-                      onChange={(e) => {
-                        pickImages(e.target.files);
+                      onChange={async (e) => {
+                        const files = e.target.files;
+                        if (files && files.length > 0) {
+                          await pickImages(files);
+                        }
                         setAttachmentsOpen(false);
+                        e.target.value = "";
                       }}
                     />
                   </label>

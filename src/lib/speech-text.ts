@@ -1,13 +1,15 @@
 /**
- * Speech sanitizer: turns Alpha's *written* answer (markdown + LaTeX + tables)
- * into natural language for TTS. The display pipeline is untouched — this is a
- * separate presentation layer.
+ * ALPHA GATE — MASTER FORCE PRESENTATION PROTOCOL (Version 1.0)
+ * Speech Presentation Engine & Audio Sanitizer (Sections 13.6, 15, 16, 17, 18)
+ *
+ * Distinct from visual rendering: interprets written content semantically
+ * into natural spoken English for Text-to-Speech (TTS).
  *
  * Rules:
- *  - remove presentation syntax (headings, bold/italic markers, list bullets,
- *    table pipes, code fences, action tags, raw URLs, emoji)
- *  - preserve meaning (negative numbers, "minus", percentages, × as times,
- *    ordinary dollar amounts)
+ * - Visual markup must NEVER be vocalized ("heading two", "bold", "asterisk", "code block")
+ * - Mathematical expressions are converted to spoken equivalents (stacked fractions, roots, powers)
+ * - Currencies, numbers, percentages, dates, and units are pronounced naturally
+ * - Pauses and prosody respect semantic boundaries
  */
 
 import { stripLeakedThinking } from "./openai-compat";
@@ -60,15 +62,17 @@ export function normalizeForSpeech(input: string): string {
   let s = input || "";
   s = stripLeakedThinking(s);
 
-  // 1. Internal syntax: Remove action tags, code blocks, raw URLs, and emojis.
+  // 1. Remove internal action tags, raw URLs, and emojis
   s = s.replace(/\[\[[\s\S]*?\]\]/g, " ");
-  s = s.replace(/```[\s\S]*?```/g, " code block. ");
-  s = s.replace(/~~~[\s\S]*?~~~/g, " code block. ");
-  s = s.replace(/`([^`]+)`/g, "$1");
   s = s.replace(/https?:\/\/\S+/gi, " ");
   s = s.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F]/gu, " ");
 
-  // 2. Math → spoken math.
+  // 2. Code blocks -> brief natural notice, never vocalize syntax line-by-line
+  s = s.replace(/```(?:[a-z0-9_-]+)?\s*([\s\S]*?)```/gi, " code block. ");
+  s = s.replace(/~~~(?:[a-z0-9_-]+)?\s*([\s\S]*?)~~~/gi, " code block. ");
+  s = s.replace(/`([^`]+)`/g, "$1");
+
+  // 3. Mathematical display & inline -> natural spoken mathematics (Section 13.6)
   s = s.replace(MATH_DISPLAY, (_m, a, b) => " " + latexToSpeech(a || b || "") + " ");
   s = s.replace(MATH_INLINE, (m, a, b) => {
     const body = a ?? b ?? "";
@@ -76,42 +80,61 @@ export function normalizeForSpeech(input: string): string {
     return " " + latexToSpeech(body) + " ";
   });
 
-  // 3. Tables → row-wise natural reading.
+  // 4. Tables -> natural row-wise verbalization (Section 12.4)
   s = s.replace(/(?:^\|.*\|[ \t]*\n?)+/gm, (block) => " " + speakTable(block) + " ");
 
-  // 4. Remove presentation markers: headings, bullets, table pipes, blockquotes, horizontal rules.
+  // 5. Headings & Markdown markers -> natural phrasing followed by pause (Section 15.3, 15.5)
+  // Strip heading hashes without saying "heading"
   s = s.replace(/^\s{0,3}#{1,6}\s+/gm, "");
+  // Callouts -> natural notice
+  s = s.replace(/^>\s*\[!(?:NOTE|TIP|IMPORTANT|WARNING|ERROR|SUCCESS)\]\s*/gim, "");
   s = s.replace(/^\s{0,3}>\s?/gm, "");
+  // Horizontal rules
   s = s.replace(/^\s{0,3}([-*_])\1{2,}\s*$/gm, " ");
+  // List bullets -> natural pause, never vocalize "bullet point" (Section 15.2, 15.6)
   s = s.replace(/^\s*[-*+]\s+/gm, "");
   s = s.replace(/^\|/gm, "");
 
-  // 5. Sources / metadata footers: Strip strictly.
+  // 6. Sources / metadata footers: Strip strictly
   s = s.replace(/\*\*Sources:?\*\*[\s\S]*$/i, " ");
   s = s.replace(/_No web sources[^.]*\./gi, " ");
-  s = s.replace(/^\s*(?:✅|❌|⚠️)\s*/gm, "");
+  s = s.replace(/^\s*(?:✅|❌|⚠️|💡|📌)\s*/gm, "");
 
-  // 6. Emphasis markers — pairs only.
+  // 7. Emphasis markers — pairs only (do NOT pronounce asterisks or underscores)
   s = s.replace(/\*\*\*([^*]+)\*\*\*/g, "$1");
   s = s.replace(/\*\*([^*]+)\*\*/g, "$1");
   s = s.replace(/(^|\s)\*([^*\n]+)\*(?=\s|$|[.,;:!?])/g, "$1$2");
   s = s.replace(/(^|\s)__([^_]+)__/g, "$1$2");
   s = s.replace(/(^|\s)_([^_\n]+)_(?=\s|$|[.,;:!?])/g, "$1$2");
 
-  // 7. Semantic symbols → words.
-  s = s.replace(/(\d)\s*%/g, "$1 percent");
+  // 8. Currency pronunciation (Section 17.2)
+  s = s.replace(/\$\s?(\d[\d,]*)\.(\d{2})\b/g, (_m, dollars, cents) => {
+    const d = dollars.replace(/,/g, "");
+    const c = parseInt(cents, 10);
+    return `${d} dollars and ${c} cents`;
+  });
+  s = s.replace(/\$\s?(\d[\d,]*)/g, (_m, dollars) => {
+    const d = dollars.replace(/,/g, "");
+    return `${d} dollars`;
+  });
+
+  // 9. Numbers, Units & Symbols to words (Section 17.4, 17.6)
+  s = s.replace(/(\d+(?:\.\d+)?)\s*%/g, "$1 percent");
   s = s.replace(/%/g, " percent ");
+  s = s.replace(/(\d+(?:\.\d+)?)\s*m\/s(?:²|\^2)/gi, "$1 metres per second squared");
+  s = s.replace(/(\d+(?:\.\d+)?)\s*km\b/gi, "$1 kilometres");
+  s = s.replace(/(\d+(?:\.\d+)?)\s*kg\b/gi, "$1 kilograms");
+  s = s.replace(/(\d+(?:\.\d+)?)\s*°C/gi, "$1 degrees Celsius");
+  s = s.replace(/(\d+(?:\.\d+)?)\s*°F/gi, "$1 degrees Fahrenheit");
+
   s = s.replace(/×/g, " times ");
   s = s.replace(/÷/g, " divided by ");
   s = s.replace(/(^|[\s(])-(\d)/g, "$1minus $2");
   s = s.replace(/(\d)\s*[–—]\s*(\d)/g, "$1 to $2");
-  s = s.replace(/\$\s?(\d[\d,]*(?:\.\d+)?)/g, "$1 dollars");
-  s = s.replace(/(\d)\s*°C/gi, "$1 degrees Celsius");
-  s = s.replace(/(\d)\s*°F/gi, "$1 degrees Fahrenheit");
   s = s.replace(/[|•▪●※]+/g, ", ");
   s = s.replace(/[#*_`~]/g, "");
 
-  // 8. Clean up whitespace: preserve paragraph/sentence breaks.
+  // 10. Clean up whitespace & maintain sentence boundaries for TTS cadence
   s = s
     .replace(/[ \t]+/g, " ")
     .replace(/\s*\n\s*/g, "\n")
@@ -120,16 +143,42 @@ export function normalizeForSpeech(input: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Converts LaTeX expressions into spoken mathematical English (Section 13.6).
+ * Handles fractions, square roots, powers, Greek letters, boxed answers, and derivations.
+ */
 function latexToSpeech(tex: string): string {
   let t = tex;
-  t = t.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, " ($1) over ($2) ");
-  t = t.replace(/\\sqrt\{([^{}]+)\}/g, " square root of ($1) ");
+
+  // Boxed solutions
+  t = t.replace(/\\boxed\{([^{}]+)\}/g, " $1 ");
+
+  // Specific common fraction idioms
+  t = t.replace(/\\frac\{1\}\{2\}/g, " one half ");
+  t = t.replace(/\\frac\{1\}\{4\}/g, " one quarter ");
+  t = t.replace(/\\frac\{3\}\{4\}/g, " three quarters ");
+  t = t.replace(/\\frac\{1\}\{3\}/g, " one third ");
+  t = t.replace(/\\frac\{2\}\{3\}/g, " two thirds ");
+
+  // Explicit grouping for algebraic and multi-term fractions (Section 13.6)
+  t = t.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, (_m, num, den) => {
+    const numClean = num.trim();
+    const denClean = den.trim();
+    const numNeedsGroup = /[+\-*/]/.test(numClean);
+    const denNeedsGroup = /[+\-*/]/.test(denClean);
+    const spokenNum = numNeedsGroup ? `the quantity ${numClean}` : numClean;
+    const spokenDen = denNeedsGroup ? `the quantity ${denClean}` : denClean;
+    return ` ${spokenNum}, divided by ${spokenDen} `;
+  });
+
+  t = t.replace(/\\sqrt\{([^{}]+)\}/g, " the square root of ($1) ");
   t = t.replace(/\^\{([^{}]+)\}/g, " to the power of ($1) ");
   t = t.replace(/\^(\d+)/g, (_m, n) =>
-    n === "2" ? " squared " : n === "3" ? " cubed " : ` to the ${n} `,
+    n === "2" ? " squared " : n === "3" ? " cubed " : ` to the power of ${n} `,
   );
   t = t.replace(/_\{([^{}]+)\}/g, " sub ($1) ");
   t = t.replace(/_(\w)/g, " sub $1 ");
+
   const greek = [
     "pi",
     "theta",
@@ -144,6 +193,7 @@ function latexToSpeech(tex: string): string {
     "phi",
   ];
   for (const g of greek) t = t.replace(new RegExp(`\\\\${g}`, "g"), ` ${g} `);
+
   t = t.replace(/\\sum/g, " sum ");
   t = t.replace(/\\prod/g, " product ");
   t = t.replace(/\\int/g, " integral ");

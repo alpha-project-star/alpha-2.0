@@ -8,6 +8,8 @@
  * render with uniform Alpha presentation semantics.
  */
 
+export * from "./presentation-protocol";
+
 export type CalloutType = "NOTE" | "TIP" | "IMPORTANT" | "WARNING" | "ERROR" | "SUCCESS";
 
 export interface TextSegment {
@@ -137,23 +139,17 @@ export function normalizePresentation(input: string): string {
       // 4. Normalize Tables (Ensure delimiter rows and blank line separation)
       text = normalizeTables(text);
 
-      // 5. Normalize Heading hierarchy (Convert single '# ' to '## ' for Alpha style)
-      text = text.replace(/^#\s+(?![#\s])/gm, "## ");
-
-      // 6. Ensure blank lines before lists, blockquotes, and headings for reliable parsing
+      // 5. Ensure blank lines before lists, blockquotes, and headings for reliable parsing
       text = ensureBlockSpacing(text);
 
-      // 7. Enforce paragraph separation (Double newlines between distinct blocks)
+      // 6. Enforce paragraph separation (Double newlines between distinct blocks)
       text = enforceParagraphSeparation(text);
 
-      // 8. Convert any media hyperlinks or bare media URLs into embedded markdown (![...](url))
+      // 7. Convert any media hyperlinks or bare media URLs into embedded markdown (![...](url))
       text = normalizeMediaEmbeds(text);
 
-      // 9. Strip any surviving tool-call or thinking leakage that might have escaped prior filters
+      // 8. Strip any surviving tool-call or thinking leakage that might have escaped prior filters
       text = stripPresentationLeakage(text);
-
-      // 10. Enforce modern ChatGPT-style canonical structure (bold lead-ins, bulleted breakdowns)
-      text = applyCanonicalPresentation(text);
 
       normalizedSegments.push(text);
     }
