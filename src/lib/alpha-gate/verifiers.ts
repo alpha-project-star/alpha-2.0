@@ -601,10 +601,12 @@ export function verifyAndReconcileSources(
     }
   }
 
-  const validCited = (citedNumbers.size > 0
-    ? [...citedNumbers].filter((n) => sourcesMap.has(n))
-    : Array.from(sourcesMap.keys())
-  )
+  if (citedNumbers.size === 0) {
+    return { text: cleanBody, filtered: hadSourcesSection || sanitized.modified };
+  }
+
+  const validCited = [...citedNumbers]
+    .filter((n) => sourcesMap.has(n))
     .sort((a, b) => a - b)
     .slice(0, 5)
     .map((n) => sourcesMap.get(n)!)
@@ -636,7 +638,7 @@ export function stripToolLeakage(input: string): { text: string; stripped: boole
     /\b(?:generateImage|generateVideo|webSearch|createReminder|addNote)\s*\([^)]*\)/gim,
     /\b(?:tool_call_id|tool_call|function_call|arguments)\s*[:=]\s*[^\n]+/gim,
     /\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{[^}]+\}\s*\}/gim,
-    /\[?✅️?\s*(?:generateimage|generatevideo|search|reminder)\s+complete\]?/gim,
+    /\[?✅️?\s*(?:generateimage|generatevideo|web_?search|search|reminder)\s+completed?\.?\]?/gim,
     /^(?:Status|Result|Tool Result)\s*:\s*(?:success|completed|true|false)\b/gim,
   ];
 

@@ -608,133 +608,59 @@ export class BoundedResearchService {
     const articleLinks: string[] = [];
     const processedUrls = new Set<string>();
 
-    // Pass 1: Fetch and identify
-    for (const result of results) {
-      if (signal?.aborted) {
-        const err = new Error("Aborted");
-        err.name = "AbortError";
-        throw err;
-      }
-      if (openedPages >= this.maxPages) {
-        break;
-      }
-
-      let page: { title: string; content: string; status: string };
-
-      try {
-        page = await this.provider.readPage(result.url, { signal });
-      } catch (error: any) {
-        if (signal?.aborted) {
-          const err = new Error("Aborted");
-          err.name = "AbortError";
-          throw err;
-        }
-
-        page = {
-          title: "",
-          content: "",
-          status: "failed",
-        };
-      }
-      openedPages++;
-      processedUrls.add(result.url);
-
-      if (page.status === "success") {
-        const extracted = extractRelevantEvidence(page.content, query);
-        if (extracted && extracted.trim().length > 30) {
-          let publisher = "Unknown";
-          try {
-            publisher = new URL(result.url).hostname.replace(/^www\./, "");
-          } catch {}
-          evidence.push({
-            url: result.url,
-            title: page.title || result.title,
-            excerpt: extracted,
-            status: "page-read-success",
-            publisher,
-            publishedDate: result.date,
-            retrievedAt: new Date().toISOString(),
-            rawContent: page.content,
-          });
-        }
-
-        // If it's a landing page (has many article links), extract them for deeper reading
-        const links = extractArticleLinks(page.content, result.url);
-        if (links.length > 2) {
-          const scoredLinks = links
-            .filter((link) => !processedUrls.has(link))
-            .map((link) => ({ link, score: scoreCandidateLink(link, query) }))
-            .sort((a, b) => b.score - a.score);
-
-          for (const { link } of scoredLinks) {
-            if (articleLinks.length >= 5) break;
-            if (scoreCandidateLink(link, query) >= 0) {
-              articleLinks.push(link);
-              processedUrls.add(link);
-            }
-          }
-        }
-      } else {
-        // Full page read failed — fallback immediately to the search snippet
-        if (result.snippet && result.snippet.trim().length > 15) {
-          let publisher = "Unknown";
-          try {
-            publisher = new URL(result.url).hostname.replace(/^www\./, "");
-          } catch {}
-          evidence.push({
-            url: result.url,
-            title: result.title,
-            excerpt: result.snippet,
-            status: "snippet-evidence",
-            publisher: result.source || publisher,
-            publishedDate: result.date,
-            retrievedAt: new Date().toISOString(),
-          });
-        }
-      }
-    }
-
-    // Pass 2: Fetch specific candidate articles if we need more depth
-    if (evidence.length < 3 && articleLinks.length > 0) {
-      for (const link of articleLinks) {
-        if (signal?.aborted) {
-          const err = new Error("Aborted");
-          err.name = "AbortError";
-          throw err;
-        }
-        if (openedPages >= 8) break;
-        activity.set("reading_article");
-        let page: { title: string; content: string; status: string };
-
+    // Pass 1: Fetch and identify top results in parallel
+    const targetResults = results.slice(0, 3);
+    const pageReads = await Promise.allSettled(
+      targetResults.map(async (r) => {
         try {
-          page = await this.provider.readPage(link, { signal });
+          const page = await this.provider.readPage(r.url, { signal });
+          return { result: r, page };
         } catch (error: any) {
-          if (signal?.aborted) {
-            const err = new Error("Aborted");
-            err.name = "AbortError";
-            throw err;
-          }
-
-          openedPages++;
-          continue;
+          if (signal?.aborted) throw error;
+          return { result: r, page: { title: "", content: "", status: "failed" } };
         }
+      }),
+    );
 
+    for (const outcome of pageReads) {
+      if (outcome.status === "fulfilled") {
+        const { result, page } = outcome.value;
         openedPages++;
+        processedUrls.add(result.url);
+
         if (page.status === "success") {
           const extracted = extractRelevantEvidence(page.content, query);
           if (extracted && extracted.trim().length > 30) {
             let publisher = "Unknown";
             try {
-              publisher = new URL(link).hostname.replace(/^www\./, "");
+              publisher = new URL(result.url).hostname.replace(/^www\./, "");
             } catch {}
             evidence.push({
-              url: link,
-              title: page.title,
+              url: result.url,
+              title: page.title || result.title,
               excerpt: extracted,
               status: "page-read-success",
               publisher,
+              publishedDate: result.date,
               retrievedAt: new Date().toISOString(),
               rawContent: page.content,
+            });
+          }
+        } else {
+          // Full page read failed — fallback immediately to the search snippet
+          if (result.snippet && result.snippet.trim().length > 15) {
+            let publisher = "Unknown";
+            try {
+              publisher = new URL(result.url).hostname.replace(/^www\./, "");
+            } catch {}
+            evidence.push({
+              url: result.url,
+              title: result.title,
+              excerpt: result.snippet,
+              status: "snippet-evidence",
+              publisher: result.source || publisher,
+              publishedDate: result.date,
+              retrievedAt: new Date().toISOString(),
             });
           }
         }

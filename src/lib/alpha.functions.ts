@@ -418,7 +418,7 @@ You are fully aware of your own toolkit inside this app:
 - /memories — long-term memory the user wants you to keep (topic, detail).
 - /image — image generation dashboard.
 - /settings — provider keys, model routing, voice prefs, Alpha data.
-- Live Web Search — You have a callable 'web_search' tool for on-demand live web research. The orchestrator may also automatically run the centralized search and research system before generation when the user's request clearly requires current or externally verifiable information, injecting retrieved findings under "LIVE WEB SEARCH RESULTS". Both search paths use the same evidence pipeline. Use the callable tool when live information is needed and sufficient verified results are not already available in the current context. Never claim a search occurred unless actual search results, a successful web_search tool result, or valid orchestrator-injected search findings are present. If search fails or returns insufficient evidence, state that honestly and do not invent sources or citations.
+- Live Web Search (WEB SEARCH IS A NATIVE TOOL AND AN ORCHESTRATOR CAPABILITY) — You have a canonical 'web_search' function tool for on-demand live web research. The orchestrator may also automatically run the centralized search and research system before generation when the user's request clearly requires current or externally verifiable information, injecting retrieved findings under "LIVE WEB SEARCH RESULTS". Both search paths use the same authoritative search engine and evidence pipeline. Use the callable tool when live information is needed and sufficient verified results are not already available in the current context. Never claim a search occurred unless actual search results, a successful web_search tool result, or valid orchestrator-injected search findings are present. If search fails or returns insufficient evidence, state that honestly and do not invent sources or citations.
 - Weather Tool — Real-time weather and forecasts for any location via Open-Meteo.
 - Calculator (evaluateMath) — Secure sandbox for deterministic mathematical, scientific, and financial calculations.
 - Knowledge Lookup — Wikipedia and arXiv research paper search.
@@ -704,6 +704,74 @@ export async function fetchLiveWebContext(
   return lines.join("\n");
 }
 
+export function formatSearchSynthesisFallback(webContext: string, query?: string): string {
+  if (!webContext) return "";
+  const sourcesMap = parseSourcesFromWebContext(webContext);
+  if (!sourcesMap || sourcesMap.size === 0) return "";
+
+  const findings: string[] = [];
+  const lines = webContext.split("\n");
+  const seenIds = new Set<number>();
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const sourceMatch = line.match(/^\[(\d+)\]\s+(.+)$/);
+    if (!sourceMatch) continue;
+
+    const id = Number(sourceMatch[1]);
+    if (seenIds.has(id)) continue;
+    const src = sourcesMap.get(id);
+    if (!src) continue;
+    seenIds.add(id);
+
+    // Look ahead up to 6 lines for Summary:
+    let summary = "";
+    for (let j = i + 1; j < Math.min(lines.length, i + 7); j++) {
+      const ahead = lines[j].trim();
+      if (ahead.startsWith("[") && /^\[\d+\]/.test(ahead)) break;
+      if (ahead.startsWith("---")) break;
+      const sumMatch = ahead.match(/^Summary:\s*(.+)$/i);
+      if (sumMatch) {
+        summary = sumMatch[1].replace(/\*\*/g, "").trim();
+        break;
+      }
+    }
+
+    // Clean title (remove trailing URL or DuckDuckGo suffix)
+    let cleanTitle = src.title.replace(/\s+-\s+https?:\/\/\S+$/, "").trim();
+    cleanTitle = cleanTitle.replace(/\s*\([^)]*DuckDuckGo[^)]*\)/gi, "").trim();
+
+    if (summary && summary.length > 20) {
+      findings.push(`• [${id}] **${cleanTitle}**\n  ${summary}`);
+    } else {
+      findings.push(`• [${id}] **${cleanTitle}**`);
+    }
+
+    if (findings.length >= 5) break;
+  }
+
+  // Fallback if no lines matched
+  if (findings.length === 0) {
+    for (const [id, s] of sourcesMap.entries()) {
+      if (findings.length >= 5) break;
+      let cleanTitle = s.title.replace(/\s+-\s+https?:\/\/\S+$/, "").trim();
+      cleanTitle = cleanTitle.replace(/\s*\([^)]*DuckDuckGo[^)]*\)/gi, "").trim();
+      findings.push(`• [${id}] **${cleanTitle}**`);
+    }
+  }
+
+  const cleanQuery = query
+    ? ` for **${query.replace(/^(?:search(?:\s+the\s+web)?(?:\s+for)?)\s+/i, "").slice(0, 80)}**`
+    : "";
+  const findingsBody = findings.join("\n\n");
+  const sourcesSection = Array.from(sourcesMap.entries())
+    .slice(0, 5)
+    .map(([id, s]) => `- [${id}] [${s.title.replace(/\s*\([^)]*DuckDuckGo[^)]*\)/gi, "").trim()}](${s.url})`)
+    .join("\n");
+
+  return `Here are the latest findings retrieved from the web${cleanQuery}:\n\n${findingsBody}\n\n**Sources:**\n${sourcesSection}`;
+}
+
 // ---------------------------------------------------------------------------
 // Tool Execution
 // ---------------------------------------------------------------------------
@@ -728,7 +796,7 @@ export interface NativeToolExecutionSummary {
   executedLogicalKeys?: string[];
 }
 
-export async function executeTool(call: any, context: ToolContext, signal?: AbortSignal) {
+export async function executeTool(call: any, context: ToolContext, signal?: AbortSignal, deadlineMs?: number) {
   if (signal?.aborted) throw new Error("Aborted");
   const { name, arguments: argsRaw } = call.function;
   let args: any = {};
@@ -871,8 +939,7 @@ export async function executeTool(call: any, context: ToolContext, signal?: Abor
             };
           }
 
-          const webContext = await 
-        fetchLiveWebContext(searchQuery, signal);
+          const webContext = await fetchLiveWebContext(searchQuery, signal, deadlineMs);
 
           return {
            success: true,
@@ -1404,15 +1471,16 @@ export async function runChat(
     return rem;
   };
 
-  try {
-    checkTurnDeadline();
-
-    const lastUserMsg = [...history].reverse().find((m) => m.role === "user");
+  const lastUserMsg = [...history].reverse().find((m) => m.role === "user");
   const hasImages = !!lastUserMsg?.images?.length;
   const hasFiles = !!lastUserMsg?.attachments?.length;
   const userText = lastUserMsg?.text || "";
+  let webContext = "";
 
-  // Detect whether user is answering a prior assistant clarification/question authoritatively
+  try {
+    checkTurnDeadline();
+
+    // Detect whether user is answering a prior assistant clarification/question authoritatively
   const pendingClarif = currentUid ? reminderContextManager.getPendingClarification(currentUid) : null;
   const isAnsweringClarification = !!pendingClarif;
   if (isAnsweringClarification && userText) {
@@ -1517,7 +1585,7 @@ export async function runChat(
   const rolling = conversationSummary.get();
 
   // ---- Real-time web search execution & capability routing ----
-  let webContext = "";
+  webContext = "";
   let searchHint = SEARCH_FORBIDDEN_HINT;
   if (online && !hasImages) {
     const decision = decideSearch(userText);
@@ -1561,7 +1629,7 @@ export async function runChat(
     (webContext ? `\n\n${webContext}` : "");
 
   if (routes.length) {
-    const sys = buildSys(false);
+    let sys = buildSys(false);
     const budget = hasImages ? "vision" : task;
     const maxTokens =
       MAX_OUTPUT_TOKENS[budget as keyof typeof MAX_OUTPUT_TOKENS] ?? MAX_OUTPUT_TOKENS.auto;
@@ -1620,15 +1688,16 @@ export async function runChat(
         lastErr = err;
         if (err instanceof WholeTurnTimeoutError || err?.name === "TimeoutError" || err?.status === 504 || getRemainingMs() <= 0) {
           activity.clear();
-          if (lifecycle.getCompletedMutations().size > 0 || lifecycle.getAllOperations().some((o) => o.status === "completed")) {
-            const actionResults = Array.from(lifecycle.getAllOperations())
-              .filter((o) => o.status === "completed")
-              .map((o) => ({
-                tag: o.name,
-                status: "success" as const,
-                message: `${o.name} completed.`,
-                logicalKeys: o.logicalKeys,
-              }));
+          const completedMutations = Array.from(lifecycle.getAllOperations())
+            .filter((o) => o.isMutation && o.status === "completed");
+
+          if (completedMutations.length > 0) {
+            const actionResults = completedMutations.map((o) => ({
+              tag: o.name,
+              status: "success" as const,
+              message: `${o.name} completed.`,
+              logicalKeys: o.logicalKeys,
+            }));
             const gateRes = alphaGate.process({
               rawText: "",
               actionResults,
@@ -1639,6 +1708,21 @@ export async function runChat(
               return gateRes.approvedText;
             }
           }
+
+          if (webContext && /^\[1\]/m.test(webContext)) {
+            const synthesized = formatSearchSynthesisFallback(webContext, userText);
+            if (synthesized) {
+              const gateRes = alphaGate.process({
+                rawText: synthesized,
+                origin: origin || "model",
+                webContext,
+              });
+              if (gateRes.approvedText && gateRes.approvedText !== ALPHA_GATE_FALLBACK_TEXT) {
+                return gateRes.approvedText;
+              }
+            }
+          }
+
           throw err instanceof WholeTurnTimeoutError ? err : new WholeTurnTimeoutError(err?.message || "Whole-turn deadline expired.");
         }
         if (err?.name === "AbortError" || signal?.aborted) {
@@ -1754,7 +1838,7 @@ export async function runChat(
           };
 
           try {
-            const toolPromise = executeTool(call, context, signal);
+            const toolPromise = executeTool(call, context, signal, deadlineMs);
             pendingToolPromises.set(invocationKey, toolPromise);
             
             toolPromise.catch(() => {}); // Prevent unhandled rejection warnings if toolPromise rejects after race settles
@@ -1846,6 +1930,7 @@ export async function runChat(
             // Preserve retrieved evidence across the integration boundary for Alpha Gate source verification
             if ((call.function?.name === 'web_search' || call.function?.name === 'search') && typeof result?.data === 'string' && result.data.trim()) {
               webContext = webContext ? `${webContext}\n\n${result.data}` : result.data;
+              sys = buildSys(false);
             } else if (call.function?.name === 'lookupKnowledge' && result?.success && result?.data) {
               const kData = result.data;
               const existingCount = (webContext.match(/^\[\d+\]/gm) || []).length;
@@ -1996,8 +2081,8 @@ export async function runChat(
       lastAnsweredBy = routeLabel(prov, model);
       activity.set("preparing");
       let rawText = finalResponse.finalText || "";
-      if (/^\s*(?:web\s+)?search\s+complete\.?\s*$/i.test(rawText) || (/^[\s\S]{0,35}$/.test(rawText) && webContext)) {
-        rawText = `Here are the verified search findings based on your request:\n\n${webContext.slice(0, 1200)}`;
+      if (/^\s*(?:web\s+)?search\s+complete\.?\s*$/i.test(rawText) || (!rawText.trim() && webContext) || (/^[\s\S]{0,35}$/.test(rawText) && webContext)) {
+        rawText = formatSearchSynthesisFallback(webContext, userText) || `Here are the verified search findings based on your request:\n\n${webContext.slice(0, 1200)}`;
       }
       let finalText = await finalizeReply(rawText, webContext, toolSummary, { userId: currentUid, lifecycle, signal, origin, deferredProse });
       if (generatedMedia.length > 0) {
@@ -2061,15 +2146,16 @@ export async function runChat(
   } catch (err: any) {
     activity.clear();
     if (err instanceof WholeTurnTimeoutError || err?.name === "TimeoutError" || err?.status === 504 || getRemainingMs() <= 0) {
-      if (lifecycle.getCompletedMutations().size > 0 || lifecycle.getAllOperations().some((o) => o.status === "completed")) {
-        const actionResults = Array.from(lifecycle.getAllOperations())
-          .filter((o) => o.status === "completed")
-          .map((o) => ({
-            tag: o.name,
-            status: "success" as const,
-            message: `${o.name} completed.`,
-            logicalKeys: o.logicalKeys,
-          }));
+      const completedMutations = Array.from(lifecycle.getAllOperations())
+        .filter((o) => o.isMutation && o.status === "completed");
+
+      if (completedMutations.length > 0) {
+        const actionResults = completedMutations.map((o) => ({
+          tag: o.name,
+          status: "success" as const,
+          message: `${o.name} completed.`,
+          logicalKeys: o.logicalKeys,
+        }));
         const gateRes = alphaGate.process({
           rawText: "",
           actionResults,
@@ -2080,6 +2166,21 @@ export async function runChat(
           return gateRes.approvedText;
         }
       }
+
+      if (webContext && /^\[1\]/m.test(webContext)) {
+        const synthesized = formatSearchSynthesisFallback(webContext, userText);
+        if (synthesized) {
+          const gateRes = alphaGate.process({
+            rawText: synthesized,
+            origin: origin || "model",
+            webContext,
+          });
+          if (gateRes.approvedText && gateRes.approvedText !== ALPHA_GATE_FALLBACK_TEXT) {
+            return gateRes.approvedText;
+          }
+        }
+      }
+
       throw err instanceof WholeTurnTimeoutError ? err : new WholeTurnTimeoutError(err?.message || "Whole-turn deadline expired.");
     }
     throw err;

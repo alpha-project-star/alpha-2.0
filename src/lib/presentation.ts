@@ -120,6 +120,9 @@ export function normalizePresentation(input: string): string {
     } else {
       let text = seg.content;
 
+      // 0. Demote top-level H1 (# Heading) to canonical Alpha H2 (## Heading)
+      text = text.replace(/^(?:[ \t]*)#([ \t]+[^\n#].*)$/gm, "##$1");
+
       // 1. Normalize LaTeX math delimiters to KaTeX-compatible standard
       text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `\n$$\n${math.trim()}\n$$\n`);
       text = text.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${math.trim()}$`);

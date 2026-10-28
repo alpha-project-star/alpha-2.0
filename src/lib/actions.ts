@@ -1693,11 +1693,29 @@ const ICON: Record<ActionStatus, string> = {
   partial: "⚠️",
 };
 
+const NON_MUTATION_TAGS = new Set([
+  "web_search",
+  "search",
+  "lookupknowledge",
+  "lookupwikipedia",
+  "lookuparxiv",
+  "evaluatemath",
+  "fetchweather",
+  "inspectgithubrepo",
+]);
+
 /** Render the execution record appended under Alpha's reply. */
 export function renderActionReport(results: ActionResult[]): string {
-  if (!results.length) return "";
-  const lines = results.map((r) => `${ICON[r.status]} ${r.message}`);
-  const anyBad = results.some((r) => r.status !== "success");
+  if (!results || !results.length) return "";
+  const mutationResults = results.filter((r) => {
+    const t = (r.tag || "").toLowerCase().trim();
+    if (NON_MUTATION_TAGS.has(t)) return false;
+    if (/^web_?search$/i.test(t)) return false;
+    return true;
+  });
+  if (!mutationResults.length) return "";
+  const lines = mutationResults.map((r) => `${ICON[r.status]} ${r.message}`);
+  const anyBad = mutationResults.some((r) => r.status !== "success");
   return (
     (anyBad ? "**Action log — read this over anything I said above:**\n" : "") + lines.join("\n")
   );

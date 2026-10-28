@@ -74,7 +74,7 @@ export class DuckDuckGoProvider implements SearchProvider {
   async readPage(url: string, opts?: { signal?: AbortSignal }): Promise<{ title: string; content: string; status: string }> {
     try {
       const readableUrl = `https://r.jina.ai/${url}`;
-      const signal = this.combineSignal(10000, opts?.signal);
+      const signal = this.combineSignal(5000, opts?.signal);
       const text = await fetch(readableUrl, {
         headers: { "X-No-Cache": "true", "User-Agent": "Mozilla/5.0" },
         signal,
