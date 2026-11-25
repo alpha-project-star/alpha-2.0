@@ -692,7 +692,7 @@ export async function fetchLiveWebContext(
   if (research.evidence && research.evidence.length > 0) {
     lines.push(`---`, `Verified content details:`);
     const urlMap = new Map(sources.map((s) => [normalizeSourceUrl(s.url), s.id]));
-    research.evidence.forEach((e: { url: string; title: string; publisher?: string; retrievedAt: string | number; excerpt: string }) => {
+    research.evidence.forEach((e: NonNullable<typeof research.evidence>[number]) => {
       const canonicalId = urlMap.get(normalizeSourceUrl(e.url));
       const prefix = canonicalId ? `[${canonicalId}] ` : "";
       lines.push(
