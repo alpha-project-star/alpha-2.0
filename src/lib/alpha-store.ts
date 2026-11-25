@@ -353,6 +353,8 @@ export const ALPHA_USER_KEY_PREFIXES: readonly string[] = [
   "alpha.deliveries.v1",
   "alpha.cloudSync.v1",
   "alpha.nextSeq.v1",
+  "alpha.chat_session",
+  "alpha.internal_session",
   "alpha.proactive.lastBrief",
   "alpha.proactive.lastBillsNudge",
   "alpha.proactive.lastPlansNudge",
@@ -368,7 +370,8 @@ export function isKeyForUid(key: string, uid: string): boolean {
   if (!key || !uid) return false;
 
   for (let i = 0; i < ALPHA_USER_KEY_PREFIXES.length; i++) {
-    if (key === `${ALPHA_USER_KEY_PREFIXES[i]}.${uid}`) {
+    const prefix = ALPHA_USER_KEY_PREFIXES[i];
+    if (key === `${prefix}.${uid}` || (key.startsWith(`${prefix}.`) && key.endsWith(`.${uid}`))) {
       return true;
     }
   }
@@ -713,7 +716,7 @@ function upsert<T extends { id: string }>(list: T[], item: T): T[] {
 
 function queueCloudUpsert(
   collectionName: "memories" | "notes" | "tasks" | "bills" | "goals",
-  item: { id: string; [key: string]: unknown },
+  item: { id: string },
 ): void {
   void import("./cloud-sync")
     .then(({ syncDocToCloud }) => syncDocToCloud(collectionName, item.id, item))
