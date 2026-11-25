@@ -114,7 +114,6 @@ export default defineConfig({
     tsconfigPaths({ projects: ["./tsconfig.json"] }),
     !isTest &&
       tanstackStart({
-        autoCodeSplitting: false,
         server: { entry: "server" },
         client: { entry: "./src/client.tsx" },
       }),
@@ -123,7 +122,7 @@ export default defineConfig({
         preset: "node-server",
         devServer: {
           port: 3001,
-          host: "0.0.0.0",
+          hostname: "127.0.0.1",
         },
         rollupConfig: {
           onwarn,
@@ -169,14 +168,11 @@ export default defineConfig({
     },
   },
   server: {
-    host: "0.0.0.0",
+    host: "127.0.0.1",
     port: 3000,
     strictPort: true,
-    allowedHosts: true,
-    cors: true,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-    },
+    allowedHosts: false,
+    cors: false,
   },
 });
 
