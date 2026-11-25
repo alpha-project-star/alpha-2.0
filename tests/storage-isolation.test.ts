@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  alphaStore,
   getKey,
   getLegacyStorageKeys,
   importLegacyStorageForCurrentUser,
@@ -44,6 +45,14 @@ describe("UID-scoped local persistence", () => {
     setStoreUser("account-B");
     expect(getKey("alpha.chat.v1")).toBe("alpha.chat.v1.account-B");
     expect(getKey("alpha.chat.v1", "account-A")).toBe("alpha.chat.v1.account-A");
+  });
+
+  it("does not reuse another account's settings when switching UIDs", async () => {
+    await alphaStore.setSettings({ personaExtra: "private account A preference" });
+    setStoreUser("account-B");
+    expect(alphaStore.get().settings.personaExtra).not.toBe("private account A preference");
+    expect(values.get("alpha.settings.v1.account-A")).toContain("private account A preference");
+    expect(values.get("alpha.settings.v1.account-B")).toBeNull();
   });
 
   it("keeps unscoped legacy data intact until the current user explicitly imports it", () => {
