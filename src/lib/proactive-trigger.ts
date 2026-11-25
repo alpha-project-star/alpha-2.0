@@ -113,7 +113,7 @@ export class ProactiveTrigger {
       if (!effectiveUserId || typeof effectiveUserId !== 'string' || !effectiveUserId.trim()) {
         const fallbackId = extractEventField(rawEvent, 'eventId');
         return {
-          success: false,
+          success: false as const,
           eventId: fallbackId,
           error: {
             code: 'UNAUTHENTICATED',
@@ -128,7 +128,7 @@ export class ProactiveTrigger {
       if (!validation.success) {
         const fallbackId = extractEventField(rawEvent, 'eventId');
         return {
-          success: false,
+          success: false as const,
           eventId: fallbackId,
           error: {
             code: 'INVALID_EVENT',
@@ -141,7 +141,7 @@ export class ProactiveTrigger {
       // 3. User Isolation / Identity Match
       if (event.userId !== authUser) {
         return {
-          success: false,
+          success: false as const,
           eventId: event.eventId,
           error: {
             code: 'USER_MISMATCH',
@@ -153,7 +153,7 @@ export class ProactiveTrigger {
       // 4. In-Flight Process Concurrency Lock
       if (this.inFlightEvents.has(event.eventId)) {
         return {
-          success: false,
+          success: false as const,
           eventId: event.eventId,
           error: {
             code: 'CONCURRENT_PROCESSING',
@@ -178,7 +178,7 @@ export class ProactiveTrigger {
             });
           } catch (err: any) {
             return {
-              success: false,
+              success: false as const,
               eventId: event.eventId,
               error: {
                 code: 'REPOSITORY_ERROR',
@@ -188,7 +188,7 @@ export class ProactiveTrigger {
           }
         }
         return {
-          success: false,
+          success: false as const,
           eventId: event.eventId,
           error: {
             code: 'ALREADY_HANDLED',
@@ -209,7 +209,7 @@ export class ProactiveTrigger {
             return {
               status: 'error' as const,
               result: {
-                success: false,
+                success: false as const,
                 eventId: event.eventId,
                 error: {
                   code: 'REPOSITORY_ERROR' as ProactiveErrorCode,
@@ -223,7 +223,7 @@ export class ProactiveTrigger {
             return {
               status: 'error' as const,
               result: {
-                success: false,
+                success: false as const,
                 eventId: event.eventId,
                 error: {
                   code: 'REPOSITORY_ERROR' as ProactiveErrorCode,
@@ -237,7 +237,7 @@ export class ProactiveTrigger {
             return {
               status: 'error' as const,
               result: {
-                success: false,
+                success: false as const,
                 eventId: event.eventId,
                 error: {
                   code: 'INVALID_EVENT' as ProactiveErrorCode,
@@ -251,7 +251,7 @@ export class ProactiveTrigger {
             return {
               status: 'error' as const,
               result: {
-                success: false,
+                success: false as const,
                 eventId: event.eventId,
                 error: {
                   code: 'ALREADY_HANDLED' as ProactiveErrorCode,
@@ -269,7 +269,7 @@ export class ProactiveTrigger {
               return {
                 status: 'error' as const,
                 result: {
-                  success: false,
+                  success: false as const,
                   eventId: event.eventId,
                   error: {
                     code: 'CONCURRENT_PROCESSING' as ProactiveErrorCode,
@@ -291,7 +291,7 @@ export class ProactiveTrigger {
             return {
               status: 'error' as const,
               result: {
-                success: false,
+                success: false as const,
                 eventId: event.eventId,
                 error: {
                   code: 'CONCURRENT_PROCESSING' as ProactiveErrorCode,
@@ -381,7 +381,7 @@ export class ProactiveTrigger {
           }
 
           return {
-            success: false,
+            success: false as const,
             eventId: event.eventId,
             error: {
               code: 'REPOSITORY_ERROR',
@@ -403,7 +403,7 @@ export class ProactiveTrigger {
           } catch (repoErr: any) {
             this.inFlightEvents.delete(event.eventId);
             return {
-              success: false,
+              success: false as const,
               eventId: event.eventId,
               error: {
                 code: 'REPOSITORY_ERROR',
@@ -417,7 +417,7 @@ export class ProactiveTrigger {
         this.retryCounts.delete(event.eventId);
 
         return {
-          success: true,
+          success: true as const,
           eventId: event.eventId,
           messageId,
           text: trimmed,
@@ -439,7 +439,7 @@ export class ProactiveTrigger {
 
         // Never append a fake assistant message or technical error to the chat
         return {
-          success: false,
+          success: false as const,
           eventId: event.eventId,
           error: {
             code: 'MODEL_ERROR',
@@ -468,7 +468,7 @@ export class ProactiveTrigger {
 
     if (currentRetries >= maxRetries) {
       return {
-        success: false,
+        success: false as const,
         eventId,
         error: {
           code: 'MODEL_ERROR',
@@ -505,7 +505,7 @@ export class ProactiveTrigger {
   > {
     if (!authenticatedUserId || typeof authenticatedUserId !== 'string' || !authenticatedUserId.trim()) {
       return {
-        success: false,
+        success: false as const,
         eventId: extractEventField(rawEvent, 'eventId'),
         error: { code: 'UNAUTHENTICATED', message: 'Authenticated user ID is required' },
       };
@@ -513,7 +513,7 @@ export class ProactiveTrigger {
     const validation = validateReminderDueEvent(rawEvent);
     if (!validation.success) {
       return {
-        success: false,
+        success: false as const,
         eventId: extractEventField(rawEvent, 'eventId'),
         error: { code: 'INVALID_EVENT', message: validation.error },
       };
@@ -521,7 +521,7 @@ export class ProactiveTrigger {
     const event = validation.event;
     if (event.userId !== authenticatedUserId) {
       return {
-        success: false,
+        success: false as const,
         eventId: event.eventId,
         error: { code: 'USER_MISMATCH', message: 'User mismatch' },
       };
@@ -547,10 +547,10 @@ export class ProactiveTrigger {
         notes: event.notes,
       };
 
-      return { success: true, record };
+      return { success: true as const, record };
     } catch (err: any) {
       return {
-        success: false,
+        success: false as const,
         eventId: event.eventId,
         error: { code: 'MODEL_ERROR', message: err?.message || 'Generation failed' },
       };
