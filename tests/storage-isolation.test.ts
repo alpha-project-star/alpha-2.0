@@ -100,8 +100,8 @@ describe("UID-scoped local persistence", () => {
       updatedAt: now,
     });
 
-    expect(await repository.getAcknowledgement("account-A", "event-a:in_app:ack")).not.toBeUndefined();
-    expect(await repository.getAcknowledgement("account-B", "event-a:in_app:ack")).toBeUndefined();
+    expect(await repository.getAcknowledgement("account-A", "event-a:in_app:ack")).not.toBeNull();
+    expect(await repository.getAcknowledgement("account-B", "event-a:in_app:ack")).toBeNull();
     expect(await repository.listAcknowledgements("account-B")).toEqual([]);
   });
 
@@ -124,7 +124,7 @@ describe("UID-scoped local persistence", () => {
     await repository.saveDelivery("account-A", delivery);
     expect(await repository.listDeliveries("account-A")).toHaveLength(1);
     expect(await repository.listDeliveries("account-B")).toEqual([]);
-    expect(await repository.getDelivery("account-B", delivery.deliveryId)).toBeUndefined();
+    expect(await repository.getDelivery("account-B", delivery.deliveryId)).toBeNull();
   });
 
   it("isolates reminder conversation context by UID", async () => {
@@ -136,7 +136,7 @@ describe("UID-scoped local persistence", () => {
     });
 
     expect(reminderContextManager.getContext("account-A")?.id).toBe("reminder-context-a");
-    expect(reminderContextManager.getContext("account-B")).toBeUndefined();
+    expect(reminderContextManager.getContext("account-B")).toBeNull();
   });
 
   it("isolates reminders by UID instead of projecting another user's records", async () => {
@@ -156,6 +156,6 @@ describe("UID-scoped local persistence", () => {
     await repository.createReminder("account-A", reminder);
     expect((await repository.listReminders("account-A")).map((item) => item.id)).toEqual(["reminder-a"]);
     expect(await repository.listReminders("account-B")).toEqual([]);
-    expect(await repository.getReminder("account-B", "reminder-a")).toBeUndefined();
+    expect(await repository.getReminder("account-B", "reminder-a")).toBeNull();
   });
 });
