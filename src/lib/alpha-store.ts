@@ -465,6 +465,10 @@ export function importLegacyStorageForCurrentUser(): { imported: string[]; skipp
           ? { ...record.pendingClarification, userId: currentStoreUid }
           : null,
       });
+    } else if (prefix === "alpha.acknowledgements.v1" || prefix === "alpha.deliveries.v1") {
+      const records = JSON.parse(legacyValue);
+      if (!Array.isArray(records)) throw new PersistenceError(prefix, new Error("Legacy notification records are not a valid list."));
+      valueToImport = JSON.stringify(records.map((record) => ({ ...record, userId: currentStoreUid })));
     }
     storage.setItem(scopedKey, valueToImport);
     imported.push(prefix);
