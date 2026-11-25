@@ -78,8 +78,6 @@ export interface FileRoutesByFullPath {
   '/image': typeof ImageRoute
   '/memories': typeof MemoriesRoute
   '/multimodal': typeof MultimodalRoute
-  '/multimodal': typeof MultimodalRoute
-  '/multimodal': typeof MultimodalRoute
   '/notes': typeof NotesRoute
   '/plans': typeof PlansRoute
   '/reminders': typeof RemindersRoute
@@ -91,6 +89,7 @@ export interface FileRoutesByTo {
   '/chat': typeof ChatRoute
   '/image': typeof ImageRoute
   '/memories': typeof MemoriesRoute
+  '/multimodal': typeof MultimodalRoute
   '/notes': typeof NotesRoute
   '/plans': typeof PlansRoute
   '/reminders': typeof RemindersRoute
@@ -103,6 +102,7 @@ export interface FileRoutesById {
   '/chat': typeof ChatRoute
   '/image': typeof ImageRoute
   '/memories': typeof MemoriesRoute
+  '/multimodal': typeof MultimodalRoute
   '/notes': typeof NotesRoute
   '/plans': typeof PlansRoute
   '/reminders': typeof RemindersRoute
@@ -116,6 +116,7 @@ export interface FileRouteTypes {
     | '/chat'
     | '/image'
     | '/memories'
+    | '/multimodal'
      | '/multimodal'
     | '/notes'
     | '/plans'
@@ -128,6 +129,7 @@ export interface FileRouteTypes {
     | '/chat'
     | '/image'
     | '/memories'
+    | '/multimodal'
     | '/notes'
     | '/plans'
     | '/reminders'
@@ -139,6 +141,7 @@ export interface FileRouteTypes {
     | '/chat'
     | '/image'
     | '/memories'
+    | '/multimodal'
     | '/notes'
     | '/plans'
     | '/reminders'
@@ -193,6 +196,13 @@ declare module '@tanstack/react-router' {
       path: '/memories'
       fullPath: '/memories'
       preLoaderRoute: typeof MemoriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/multimodal': {
+      id: '/multimodal'
+      path: '/multimodal'
+      fullPath: '/multimodal'
+      preLoaderRoute: typeof MultimodalRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/multimodal': {
