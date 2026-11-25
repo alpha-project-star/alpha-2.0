@@ -164,21 +164,14 @@ export class AlphaGate {
         actionStatus: actionResult.actionStatus,
       };
     } catch {
-      // Fail-Safe Fallback: never throw, never leak internal state or diagnostics
-      try {
-        const fallbackText = stripLeakedThinking(raw || "").trim();
-        return {
-          approvedText: fallbackText || ALPHA_GATE_FALLBACK_TEXT,
-          status: "fallback",
-          actionStatus: "none",
-        };
-      } catch {
-        return {
-          approvedText: ALPHA_GATE_FALLBACK_TEXT,
-          status: "fallback",
-          actionStatus: "none",
-        };
-      }
+      // Fail closed: if any verifier or normalizer fails, do not return the
+      // unverified candidate. A generic retry prompt is safer than allowing
+      // unchecked action claims, provider leakage, or unsupported citations.
+      return {
+        approvedText: ALPHA_GATE_FALLBACK_TEXT,
+        status: "fallback",
+        actionStatus: "none",
+      };
     }
   }
 }
