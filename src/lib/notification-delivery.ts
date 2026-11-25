@@ -484,7 +484,9 @@ export class NotificationDeliveryManager {
 
     // 6, 7, 8. Check Repository State, Idempotency, and Acquire Claim via Cross-Context Lock
     const lockName = `alpha_delivery_lock_${authUser}_${deliveryId}`;
-    const claimResult = await withCrossContextLock(lockName, async () => {
+    const claimResult = await withCrossContextLock<
+      { status: "resolved"; result: NotificationDeliveryResult } | { status: "acquired" }
+    >(lockName, async () => {
       if (this.repo) {
         try {
           const existing = await this.repo.getDelivery(authUser, deliveryId);
