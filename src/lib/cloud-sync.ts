@@ -12,6 +12,18 @@ import { alphaStore, type Memory, type Note, type Task, type Bill, type Goal, ty
 let activeUnsubscribers: Array<() => void> = [];
 let currentSyncedUid: string | null = null;
 
+/** Stable comparison so same-count remote edits are not silently ignored. */
+function stableSerialize(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableSerialize(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+
 export async function syncDocToCloud(
   collectionName: "memories" | "notes" | "tasks" | "bills" | "goals",
   id: string,
@@ -118,7 +130,7 @@ export function initCloudSync(): () => void {
             localMemories.forEach((m) => mergedMap.set(m.id, m));
             cloudMemories.forEach((m) => mergedMap.set(m.id, m));
             const merged = Array.from(mergedMap.values());
-            if (merged.length !== localMemories.length) {
+            if (stableSerialize(merged) !== stableSerialize(localMemories)) {
               void alphaStore.replaceAll({ memories: merged });
             }
           } else {
@@ -149,7 +161,7 @@ export function initCloudSync(): () => void {
             localNotes.forEach((n) => mergedMap.set(n.id, n));
             cloudNotes.forEach((n) => mergedMap.set(n.id, n));
             const merged = Array.from(mergedMap.values());
-            if (merged.length !== localNotes.length) {
+            if (stableSerialize(merged) !== stableSerialize(localNotes)) {
               void alphaStore.replaceAll({ notes: merged });
             }
           } else {
