@@ -349,6 +349,8 @@ export const ALPHA_USER_KEY_PREFIXES: readonly string[] = [
   "alpha.reminders.v1",
   "alpha.deliveries.v1",
   "alpha.reminder_context.v1",
+  "alpha.cloudSync.v1",
+  "alpha.nextSeq.v1",
   "alpha.proactive.lastBrief",
   "alpha.proactive.lastBillsNudge",
   "alpha.proactive.lastPlansNudge",
@@ -707,6 +709,24 @@ function upsert<T extends { id: string }>(list: T[], item: T): T[] {
   return i >= 0 ? list.map((x) => (x.id === item.id ? item : x)) : [item, ...list];
 }
 
+function queueCloudUpsert(
+  collectionName: "memories" | "notes" | "tasks" | "bills" | "goals",
+  item: { id: string; [key: string]: unknown },
+): void {
+  void import("./cloud-sync")
+    .then(({ syncDocToCloud }) => syncDocToCloud(collectionName, item.id, item))
+    .catch((error) => console.warn("[CloudSync] Could not queue local upsert:", error));
+}
+
+function queueCloudDelete(
+  collectionName: "memories" | "notes" | "tasks" | "bills" | "goals",
+  id: string,
+): void {
+  void import("./cloud-sync")
+    .then(({ deleteDocFromCloud }) => deleteDocFromCloud(collectionName, id))
+    .catch((error) => console.warn("[CloudSync] Could not queue local delete:", error));
+}
+
 export const alphaStore = {
   get: () => state,
   /** Subscribe to any persisted state change. Returns an unsubscribe fn. */
@@ -764,7 +784,7 @@ export const alphaStore = {
 
       // Ensure newly recorded messages receive unique, monotonically increasing sequence numbers
       const storage = getStorage();
-      const seqKey = "alpha.nextSeq.v1";
+      const seqKey = getKey("alpha.nextSeq.v1");
       let nextSeq = Number(storage?.getItem(seqKey) || "0");
       
       // Safety: ensure nextSeq is at least as high as any existing message in state
@@ -930,7 +950,7 @@ export const alphaStore = {
 
       // Maintain sequence integrity: allocate unique, monotonic sequence numbers,
       // preserve legacy ordering for missing sequences, and advance the global counter.
-      const seqKey = "alpha.nextSeq.v1";
+      const seqKey = getKey("alpha.nextSeq.v1");
 
       // Any message currently in internalHistory whose ID is not in msgs persists.
       // Its sequence number must be protected from collision.
@@ -1028,6 +1048,7 @@ export const alphaStore = {
       reloadState();
       const next = upsert(state.notes, n);
       writeLS(K.notes, next);
+      queueCloudUpsert("notes", n);
       state = { ...state, notes: next };
       emit();
     });
@@ -1037,6 +1058,7 @@ export const alphaStore = {
       reloadState();
       const next = state.notes.filter((x) => x.id !== id);
       writeLS(K.notes, next);
+      queueCloudDelete("notes", id);
       state = { ...state, notes: next };
       emit();
     });
@@ -1046,6 +1068,7 @@ export const alphaStore = {
       reloadState();
       const next = upsert(state.bills, b);
       writeLS(K.bills, next);
+      queueCloudUpsert("bills", b);
       state = { ...state, bills: next };
       emit();
     });
@@ -1055,6 +1078,7 @@ export const alphaStore = {
       reloadState();
       const next = state.bills.filter((x) => x.id !== id);
       writeLS(K.bills, next);
+      queueCloudDelete("bills", id);
       state = { ...state, bills: next };
       emit();
     });
@@ -1064,6 +1088,7 @@ export const alphaStore = {
       reloadState();
       const next = upsert(state.tasks, t);
       writeLS(K.tasks, next);
+      queueCloudUpsert("tasks", t);
       state = { ...state, tasks: next };
       emit();
     });
@@ -1073,6 +1098,7 @@ export const alphaStore = {
       reloadState();
       const next = state.tasks.filter((x) => x.id !== id);
       writeLS(K.tasks, next);
+      queueCloudDelete("tasks", id);
       state = { ...state, tasks: next };
       emit();
     });
@@ -1082,6 +1108,7 @@ export const alphaStore = {
       reloadState();
       const next = upsert(state.goals, g);
       writeLS(K.goals, next);
+      queueCloudUpsert("goals", g);
       state = { ...state, goals: next };
       emit();
     });
@@ -1091,6 +1118,7 @@ export const alphaStore = {
       reloadState();
       const next = state.goals.filter((x) => x.id !== id);
       writeLS(K.goals, next);
+      queueCloudDelete("goals", id);
       state = { ...state, goals: next };
       emit();
     });
@@ -1204,6 +1232,7 @@ export const alphaStore = {
         nextMemories = upsert(state.memories, cleanMem);
       }
       writeLS(K.memories, nextMemories);
+      queueCloudUpsert("memories", cleanMem);
       state = { ...state, memories: nextMemories };
       emit();
     });
@@ -1213,6 +1242,7 @@ export const alphaStore = {
       reloadState();
       const next = state.memories.filter((x) => x.id !== id);
       writeLS(K.memories, next);
+      queueCloudDelete("memories", id);
       state = { ...state, memories: next };
       emit();
     });
