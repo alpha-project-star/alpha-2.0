@@ -7,7 +7,7 @@
 import { doc, setDoc, deleteDoc, onSnapshot, collection, getDocs, writeBatch } from "firebase/firestore";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { db, auth, handleFirestoreError, OperationType } from "./firebase";
-import { alphaStore, getStorage, getKey, type Memory, type Note, type Task, type Bill, type Goal } from "./alpha-store";
+import { alphaStore, getStorage, getKey, getCurrentStoreUser, setStoreUser } from "./alpha-store";
 
 let activeUnsubscribers: Array<() => void> = [];
 let currentSyncedUid: string | null = null;
@@ -72,7 +72,7 @@ export async function syncDocToCloud(
   data: any
 ): Promise<boolean> {
   const user = auth.currentUser;
-  if (!user || !user.uid || !id) return false;
+  if (!user || !user.uid || !id || getCurrentStoreUser() !== user.uid) return false;
 
   const uid = user.uid;
   const path = `users/${uid}/${collectionName}/${id}`;
@@ -128,7 +128,7 @@ export async function deleteDocFromCloud(
   id: string
 ): Promise<boolean> {
   const user = auth.currentUser;
-  if (!user || !user.uid || !id) return false;
+  if (!user || !user.uid || !id || getCurrentStoreUser() !== user.uid) return false;
 
   const uid = user.uid;
   const path = `users/${uid}/${collectionName}/${id}`;
@@ -157,7 +157,7 @@ export function resumeCloudSyncForAccount(uid: string): void {
 
 export async function wipeAccountCloudData(uid: string): Promise<void> {
   const user = auth.currentUser;
-  if (!uid || !user || user.uid !== uid) {
+  if (!uid || !user || user.uid !== uid || getCurrentStoreUser() !== uid) {
     throw new Error("Cloud wipe refused: the active account does not match the requested UID.");
   }
 
@@ -189,6 +189,7 @@ export function initCloudSync(): () => void {
   if (typeof window === "undefined") return () => {};
 
   const unsubscribeAuth = onAuthStateChanged(auth, (user: User | null) => {
+    setStoreUser(user?.uid ?? null);
     activeUnsubscribers.forEach((unsubscribe) => {
       try { unsubscribe(); } catch {}
     });
@@ -218,7 +219,7 @@ export function initCloudSync(): () => void {
           (snapshot) => {
             // A cache-only empty snapshot is not proof that the server collection
             // is empty; wait for a server-backed snapshot before reconciling.
-            if (pausedCloudSyncUids.has(uid) || snapshot.metadata.fromCache) return;
+            if (getCurrentStoreUser() !== uid || pausedCloudSyncUids.has(uid) || snapshot.metadata.fromCache) return;
 
             const cloudItems = snapshot.docs.map((document) => ({
               ...document.data(),
