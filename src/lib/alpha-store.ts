@@ -342,7 +342,7 @@ export class PersistenceError extends Error {
 
 import { auth } from "./firebase";
 
-let currentStoreUid: string = "local-user";
+let currentStoreUid: string | null = auth.currentUser?.uid ?? null;
 
 export const ALPHA_USER_KEY_PREFIXES: readonly string[] = [
   ...Object.values(K),
@@ -372,92 +372,84 @@ export function isKeyForUid(key: string, uid: string): boolean {
 }
 
 export function isAlphaKeyPrefix(key: string): boolean {
-  return ALPHA_USER_KEY_PREFIXES.some((prefix) => key === prefix || key.startsWith(prefix));
+  return ALPHA_USER_KEY_PREFIXES.some((prefix) => key === prefix || key.startsWith(`${prefix}.`));
 }
 
 /**
- * Returns the stable canonical key for Alpha's single-user local storage.
- * All Alpha data is now stored under the base key with no UID scoping to ensure
- * data persistence across restarts and auth state changes.
+ * Alpha's browser persistence is isolated by Firebase UID. Legacy unscoped
+ * keys are intentionally left untouched until the user explicitly imports them.
  */
-export function getKey(baseKey: string): string {
-  if (!isAlphaKeyPrefix(baseKey)) {
-    return baseKey;
-  }
-  // All Alpha data now uses the stable "local-user" identity or the base key directly.
-  // We prefer the base key directly for a clean namespace.
-  return baseKey;
+export function getKey(baseKey: string, uid: string | null = currentStoreUid): string {
+  if (!isAlphaKeyPrefix(baseKey)) return baseKey;
+  return `${baseKey}.${uid || "unauthenticated"}`;
 }
 
 export function getCurrentStoreUser(): string {
-  return "local-user";
+  return currentStoreUid || "unauthenticated";
 }
 
-/**
- * Sets the active storage scope. In the single-user Alpha architecture, this is 
- * now a no-op that preserves the stable local identity.
- */
 export function setStoreUser(uid: string | null) {
-  // Stable identity is maintained regardless of Firebase auth state.
+  if (currentStoreUid === uid) return;
+  currentStoreUid = uid;
   reloadState();
   emit();
 }
 
-/**
- * Migrates legacy UID-scoped storage keys to the canonical base keys.
- * This ensures users don't lose data during the transition to the stable local identity.
- */
-function migrateLegacyScopedKeys() {
+/** Returns unscoped legacy Alpha keys without modifying or deleting them. */
+export function getLegacyStorageKeys(): string[] {
   const storage = getStorage();
-  if (!storage) return;
+  if (!storage) return [];
+  return ALPHA_USER_KEY_PREFIXES.filter((prefix) => {
+    const value = storage.getItem(prefix);
+    return value !== null && value.trim() !== "";
+  });
+}
 
-  const keysToMigrate: { from: string; to: string }[] = [];
-  
-  for (let i = 0; i < storage.length; i++) {
-    const key = storage.key(i);
-    if (!key) continue;
+/**
+ * Explicitly imports legacy unscoped data into the currently authenticated
+ * user's namespace. Original keys are retained as a recovery copy. Existing
+ * UID-scoped values are never overwritten.
+ */
+export function importLegacyStorageForCurrentUser(): { imported: string[]; skipped: string[] } {
+  const storage = getStorage();
+  if (!storage) throw new PersistenceError("localStorage", new Error("Browser storage is unavailable."));
+  if (!currentStoreUid) throw new PersistenceError("localStorage", new Error("Sign in before importing legacy Alpha data."));
+  const imported: string[] = [];
+  const skipped: string[] = [];
 
-    for (const prefix of ALPHA_USER_KEY_PREFIXES) {
-      if (key.startsWith(`${prefix}.`) && key !== prefix) {
-        keysToMigrate.push({ from: key, to: prefix });
-        break;
-      }
+  for (const prefix of ALPHA_USER_KEY_PREFIXES) {
+    const legacyValue = storage.getItem(prefix);
+    if (legacyValue === null || legacyValue.trim() === "") continue;
+    const scopedKey = getKey(prefix, currentStoreUid);
+    const scopedValue = storage.getItem(scopedKey);
+    if (scopedValue !== null && scopedValue.trim() !== "") {
+      skipped.push(prefix);
+      continue;
     }
+
+    let valueToImport = legacyValue;
+    if (prefix === "alpha.reminders.v1") {
+      const records = JSON.parse(legacyValue);
+      if (!Array.isArray(records)) throw new PersistenceError(prefix, new Error("Legacy reminders are not a valid list."));
+      valueToImport = JSON.stringify(records.map((record) => ({ ...record, userId: currentStoreUid })));
+    } else if (prefix === "alpha.reminder_context.v1") {
+      const record = JSON.parse(legacyValue);
+      valueToImport = JSON.stringify({
+        ...record,
+        userId: currentStoreUid,
+        context: record.context ? { ...record.context, userId: currentStoreUid } : null,
+        pendingClarification: record.pendingClarification
+          ? { ...record.pendingClarification, userId: currentStoreUid }
+          : null,
+      });
+    }
+    storage.setItem(scopedKey, valueToImport);
+    imported.push(prefix);
   }
 
-  for (const { from, to } of keysToMigrate) {
-    const data = storage.getItem(from);
-    if (data) {
-      const existing = storage.getItem(to);
-      if (!existing || existing === "[]" || existing === "{}" || existing.trim() === "") {
-        // Safe to migrate if target is empty
-        storage.setItem(to, data);
-      } else {
-        // If both exist, we may need to merge for certain keys (like reminders)
-        if (to === "alpha.reminders.v1") {
-          try {
-            const fromList = JSON.parse(data);
-            const toList = JSON.parse(existing);
-            if (Array.isArray(fromList) && Array.isArray(toList)) {
-              // Merge reminders, updating userId to 'local-user'
-              const merged = [...toList];
-              for (const item of fromList) {
-                if (!merged.some(r => r.id === item.id)) {
-                  merged.push({ ...item, userId: "local-user" });
-                }
-              }
-              storage.setItem(to, JSON.stringify(merged));
-            }
-          } catch (e) {
-            console.error("Failed to merge reminders during migration:", e);
-          }
-        }
-        // For other keys, we prioritize the existing canonical key or just skip
-      }
-      // Remove the legacy key after migration attempt
-      storage.removeItem(from);
-    }
-  }
+  reloadState();
+  emit();
+  return { imported, skipped };
 }
 
 /**
@@ -479,11 +471,7 @@ function parseLS<T>(key: string, schema: z.ZodType<T>, fallback: T): T {
   const storage = getStorage();
   if (!storage) return fallback;
   const targetKey = getKey(key);
-  let v = storage.getItem(targetKey);
-  if ((v === null || v === undefined || typeof v !== "string" || v.trim() === "") && key === K.settings) {
-    const unauthKey = `${K.settings}.unauthenticated`;
-    v = storage.getItem(unauthKey) || storage.getItem(K.settings);
-  }
+  const v = storage.getItem(targetKey);
   if (v === null || v === undefined || typeof v !== "string" || v.trim() === "") return fallback;
   let parsed: unknown;
   try {
@@ -546,11 +534,8 @@ export function writeLS<T>(key: string, v: T): { status: "success" | "unavailabl
 }
 
 // Initial bootstrap check
-if (typeof window !== "undefined") {
-  migrateLegacyScopedKeys();
-  if (auth.currentUser) {
-    currentStoreUid = "local-user";
-  }
+if (typeof window !== "undefined" && auth.currentUser) {
+  currentStoreUid = auth.currentUser.uid;
 }
 
 let state: AlphaState = {
@@ -691,7 +676,6 @@ function hydrateImages(msgs: ChatMessage[]): ChatMessage[] {
 function reloadState() {
   const storage = getStorage();
   if (!storage) return;
-  migrateLegacyScopedKeys();
   const rawSessions = parseLS<ChatSession[]>(K.sessions, z.array(ChatSessionSchema), []);
   const defaultSessions: ChatSession[] = rawSessions.length > 0 ? rawSessions : [
     { id: "default", title: "Main Conversation", createdAt: Date.now(), updatedAt: Date.now() }
