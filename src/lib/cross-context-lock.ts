@@ -115,7 +115,9 @@ export function withCrossContextLock<T>(
         inMemoryLocks.delete(lockName);
       }
       releaseLock();
-      throw err;
+      // Match navigator.locks.request: synchronous callback failures become
+      // rejected promises because this API always returns Promise<T>.
+      return Promise.reject(err);
     }
   } else {
     let releaseLock!: () => void;
