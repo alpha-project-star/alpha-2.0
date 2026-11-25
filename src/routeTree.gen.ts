@@ -14,6 +14,7 @@ import { Route as BillsRouteImport } from './routes/bills'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as ImageRouteImport } from './routes/image'
 import { Route as MemoriesRouteImport } from './routes/memories'
+import { Route as MultimodalRouteImport } from './routes/multimodal'
 import { Route as NotesRouteImport } from './routes/notes'
 import { Route as PlansRouteImport } from './routes/plans'
 import { Route as RemindersRouteImport } from './routes/reminders'
@@ -44,6 +45,11 @@ const MemoriesRoute = MemoriesRouteImport.update({
   path: '/memories',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MultimodalRoute = MultimodalRouteImport.update({
+  id: '/multimodal',
+  path: '/multimodal',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const NotesRoute = NotesRouteImport.update({
   id: '/notes',
   path: '/notes',
@@ -71,6 +77,9 @@ export interface FileRoutesByFullPath {
   '/chat': typeof ChatRoute
   '/image': typeof ImageRoute
   '/memories': typeof MemoriesRoute
+  '/multimodal': typeof MultimodalRoute
+  '/multimodal': typeof MultimodalRoute
+  '/multimodal': typeof MultimodalRoute
   '/notes': typeof NotesRoute
   '/plans': typeof PlansRoute
   '/reminders': typeof RemindersRoute
@@ -107,6 +116,7 @@ export interface FileRouteTypes {
     | '/chat'
     | '/image'
     | '/memories'
+     | '/multimodal'
     | '/notes'
     | '/plans'
     | '/reminders'
@@ -141,6 +151,7 @@ export interface RootRouteChildren {
   ChatRoute: typeof ChatRoute
   ImageRoute: typeof ImageRoute
   MemoriesRoute: typeof MemoriesRoute
+  MultimodalRoute: typeof MultimodalRoute
   NotesRoute: typeof NotesRoute
   PlansRoute: typeof PlansRoute
   RemindersRoute: typeof RemindersRoute
@@ -184,6 +195,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MemoriesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/multimodal': {
+      id: '/multimodal'
+      path: '/multimodal'
+      fullPath: '/multimodal'
+      preLoaderRoute: typeof MultimodalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/notes': {
       id: '/notes'
       path: '/notes'
@@ -221,6 +239,7 @@ const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRoute,
   ImageRoute: ImageRoute,
   MemoriesRoute: MemoriesRoute,
+  MultimodalRoute: MultimodalRoute,
   NotesRoute: NotesRoute,
   PlansRoute: PlansRoute,
   RemindersRoute: RemindersRoute,
