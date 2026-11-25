@@ -15,6 +15,7 @@ export function CyberEye({
   active: boolean;
   speaking: boolean;
   size: number | string;
+  showMicroText?: boolean;
 }) {
   const [eyeOn, setEyeOn] = useState(false);
   useEffect(() => subEyeActive(setEyeOn), []);
