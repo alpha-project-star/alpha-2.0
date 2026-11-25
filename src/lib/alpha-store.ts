@@ -513,7 +513,7 @@ function parseLS<T>(key: string, schema: z.ZodType<T>, fallback: T): T {
       const merged = { ...(fallback as any), ...parsed };
       const retry = schema.safeParse(merged);
       if (retry.success) return retry.data;
-      return merged as T;
+      return fallback;
     }
     return fallback;
   }
