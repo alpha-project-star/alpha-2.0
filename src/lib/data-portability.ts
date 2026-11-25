@@ -97,6 +97,57 @@ function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([arr], { type: mime });
 }
 
+/**
+ * Copies tracks from the pre-account-scoping IndexedDB into the active
+ * account's library. The legacy database is retained as a recovery copy.
+ */
+export async function importLegacyMusicForCurrentUser(): Promise<number> {
+  const currentUid = getCurrentStoreUser();
+  if (currentUid === "unauthenticated") throw new Error("Sign in before importing legacy music.");
+
+  const legacyDb = await openDb(LEGACY_DB_NAME);
+  let legacyRows: any[] = [];
+  try {
+    legacyRows = await new Promise<any[]>((resolve, reject) => {
+      const tx = legacyDb.transaction(STORE, "readonly");
+      const request = tx.objectStore(STORE).getAll();
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error || new Error("Could not read legacy music."));
+      tx.oncomplete = () => legacyDb.close();
+      tx.onerror = () => reject(tx.error || new Error("Could not read legacy music."));
+    });
+  } catch (error) {
+    legacyDb.close();
+    throw error;
+  }
+  if (!legacyRows.length) return 0;
+
+  const accountDb = await openDb();
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      const tx = accountDb.transaction(STORE, "readwrite");
+      const store = tx.objectStore(STORE);
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const existingIds = new Set((request.result || []).map((row: any) => row.id));
+        let copied = 0;
+        for (const row of legacyRows) {
+          if (row && typeof row.id === "string" && row.blob && !existingIds.has(row.id)) {
+            store.put(row);
+            copied += 1;
+          }
+        }
+        tx.oncomplete = () => resolve(copied);
+      };
+      request.onerror = () => reject(request.error || new Error("Could not inspect account music."));
+      tx.onerror = () => reject(tx.error || new Error("Could not import legacy music."));
+      tx.onabort = () => reject(tx.error || new Error("Legacy music import was aborted."));
+    });
+  } finally {
+    accountDb.close();
+  }
+}
+
 export async function exportAlphaData(): Promise<AlphaDataExport> {
   const localStorage: Record<string, string | null> = {};
   for (const key of Object.values(K)) {
