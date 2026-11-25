@@ -11,6 +11,7 @@ import { alphaStore, getStorage, getKey, type Memory, type Note, type Task, type
 
 let activeUnsubscribers: Array<() => void> = [];
 let currentSyncedUid: string | null = null;
+const pausedCloudSyncUids = new Set<string>();
 
 /** Stable comparison so same-count remote edits are not silently ignored. */
 function stableSerialize(value: unknown): string {
@@ -146,6 +147,14 @@ export async function deleteDocFromCloud(
  * Deletes the signed-in user's cloud-owned Alpha collections in bounded batches.
  * This is deliberately UID-bound and refuses to act for a different auth user.
  */
+export function pauseCloudSyncForAccount(uid: string): void {
+  pausedCloudSyncUids.add(uid);
+}
+
+export function resumeCloudSyncForAccount(uid: string): void {
+  pausedCloudSyncUids.delete(uid);
+}
+
 export async function wipeAccountCloudData(uid: string): Promise<void> {
   const user = auth.currentUser;
   if (!uid || !user || user.uid !== uid) {
@@ -174,11 +183,6 @@ export async function wipeAccountCloudData(uid: string): Promise<void> {
   }
 
   await deleteDoc(doc(db, "users", uid, "migration", "state"));
-  const metadata = readSyncMetadata(uid);
-  for (const collectionName of ["memories", "notes", "tasks", "bills", "goals"] as SyncCollection[]) {
-    metadata[collectionName] = [];
-  }
-  writeSyncMetadata(uid, metadata);
 }
 
 export function initCloudSync(): () => void {
@@ -214,7 +218,7 @@ export function initCloudSync(): () => void {
           (snapshot) => {
             // A cache-only empty snapshot is not proof that the server collection
             // is empty; wait for a server-backed snapshot before reconciling.
-            if (snapshot.metadata.fromCache) return;
+            if (pausedCloudSyncUids.has(uid) || snapshot.metadata.fromCache) return;
 
             const cloudItems = snapshot.docs.map((document) => ({
               ...document.data(),
