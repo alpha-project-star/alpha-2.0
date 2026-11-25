@@ -209,7 +209,7 @@ export class LocalDeliveryRepository implements DeliveryRepository {
     if (!storage) {
       const item = this.inMemoryFallback.get(`${userId}:${deliveryId}`);
       if (!item) throw new Error(`Delivery record not found: ${deliveryId}`);
-      const updated = { ...item, ...patch, updatedAt: Date.now() };
+      const updated = { ...item, ...patch, userId, updatedAt: Date.now() };
       this.inMemoryFallback.set(`${userId}:${deliveryId}`, updated);
       return;
     }
@@ -225,7 +225,7 @@ export class LocalDeliveryRepository implements DeliveryRepository {
       } catch {}
       const idx = list.findIndex((d) => d.deliveryId === deliveryId && d.userId === userId);
       if (idx < 0) throw new Error(`Delivery record not found: ${deliveryId}`);
-      list[idx] = { ...list[idx], ...patch, updatedAt: Date.now() };
+      list[idx] = { ...list[idx], ...patch, userId, updatedAt: Date.now() };
       storage.setItem(key, JSON.stringify(list));
     });
   }
@@ -243,7 +243,7 @@ export class LocalDeliveryRepository implements DeliveryRepository {
       const raw = storage.getItem(this.getStorageKey(userId));
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      return Array.isArray(parsed) ? parsed.filter((record: DeliveryRecord) => record.userId === userId) : [];
     } catch {
       return [];
     }
