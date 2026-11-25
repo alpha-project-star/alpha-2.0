@@ -12,28 +12,27 @@ export default function MultimodalStudio() {
 
   const handleGenerate = async (type: "image" | "video") => {
     setResult(null);
-    activity.kind = type === "image" ? "generating_image" : "generating_video";
+    const session = activity.start(type === "image" ? "generating_image" : "generating_video");
     
     try {
       const res = type === "image" 
-        ? await generateImage({ prompt })
-        : await generateVideo({ prompt });
+        ? await generateImage({ data: { prompt } })
+        : await generateVideo({ data: { prompt } });
       setResult(res.dataUrl);
     } catch (e) {
-      activity.kind = "action_failed";
+      session.error(e instanceof Error ? e.message : "Generation failed");
       console.error(e);
     } finally {
-      if (activity.kind !== "action_failed") {
-        activity.kind = "idle";
-      }
+      session.clear();
     }
   };
 
   const handleTTS = () => {
-    activity.kind = "generating_tts";
+    const session = activity.start("generating_tts");
     const utterance = new SpeechSynthesisUtterance(prompt);
+    utterance.onend = () => session.clear();
+    utterance.onerror = () => session.error("Speech playback failed");
     window.speechSynthesis.speak(utterance);
-    activity.kind = "idle";
   };
 
   return (
