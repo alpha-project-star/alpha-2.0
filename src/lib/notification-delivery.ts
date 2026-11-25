@@ -313,11 +313,11 @@ export class NotificationDeliveryManager {
     // 1. Authentication Check
     if (!rawAuth || typeof rawAuth !== 'string' || !rawAuth.trim()) {
       return {
-        success: false,
+        success: false as const,
         eventId: rawRecord?.eventId || '',
         messageId: rawRecord?.messageId,
         channel: typeof rawChannel === 'string' ? rawChannel : undefined,
-        status: 'rejected',
+        status: 'rejected' as const,
         error: {
           code: 'UNAUTHENTICATED',
           message: 'Authenticated user ID is required for notification delivery',
@@ -343,11 +343,11 @@ export class NotificationDeliveryManager {
       !rawRecord.text.trim()
     ) {
       return {
-        success: false,
+        success: false as const,
         eventId: rawRecord?.eventId || '',
         messageId: rawRecord?.messageId,
         channel: typeof rawChannel === 'string' ? rawChannel : undefined,
-        status: 'rejected',
+        status: 'rejected' as const,
         error: {
           code: 'INVALID_INPUT',
           message: 'Valid ProactiveResponseRecord with non-empty eventId, reminderId, userId, messageId, and text is required',
@@ -358,11 +358,11 @@ export class NotificationDeliveryManager {
     // 3. User Isolation / Identity Match
     if (rawRecord.userId !== authUser) {
       return {
-        success: false,
+        success: false as const,
         eventId: rawRecord.eventId,
         messageId: rawRecord.messageId,
         channel: typeof rawChannel === 'string' ? rawChannel : undefined,
-        status: 'rejected',
+        status: 'rejected' as const,
         error: {
           code: 'USER_MISMATCH',
           message: `User isolation violation: record user ${rawRecord.userId} does not match authenticated user ${authUser}`,
@@ -374,11 +374,11 @@ export class NotificationDeliveryManager {
     const requestedChannel = rawChannel ?? 'in_app';
     if (!requestedChannel || typeof requestedChannel !== 'string' || !requestedChannel.trim()) {
       return {
-        success: false,
+        success: false as const,
         eventId: rawRecord.eventId,
         messageId: rawRecord.messageId,
         channel: String(requestedChannel || ''),
-        status: 'rejected',
+        status: 'rejected' as const,
         error: {
           code: 'UNSUPPORTED_CHANNEL',
           message: `Channel "${requestedChannel}" is not supported. Active channel: in_app`,
@@ -391,11 +391,11 @@ export class NotificationDeliveryManager {
 
     if (resolution.status === 'unsupported') {
       return {
-        success: false,
+        success: false as const,
         eventId: rawRecord.eventId,
         messageId: rawRecord.messageId,
         channel,
-        status: 'rejected',
+        status: 'rejected' as const,
         error: {
           code: 'UNSUPPORTED_CHANNEL',
           message: resolution.error || `Channel "${channel}" is not supported. Active channel: in_app`,
@@ -405,11 +405,11 @@ export class NotificationDeliveryManager {
 
     if (resolution.status === 'unavailable') {
       return {
-        success: false,
+        success: false as const,
         eventId: rawRecord.eventId,
         messageId: rawRecord.messageId,
         channel,
-        status: 'rejected',
+        status: 'rejected' as const,
         error: {
           code: 'CHANNEL_UNAVAILABLE',
           message: resolution.error || `Channel "${channel}" is currently unavailable in this environment.`,
@@ -442,12 +442,12 @@ export class NotificationDeliveryManager {
 
       if (!channelResult.success) {
         return {
-          success: false,
+          success: false as const,
           deliveryId: channelResult.deliveryId || deliveryId,
           eventId: channelResult.eventId,
           messageId: channelResult.messageId || rawRecord.messageId,
           channel,
-          status: 'rejected',
+          status: 'rejected' as const,
           error: {
             code: (channelResult.error?.code as DeliveryErrorCode) || 'DELIVERY_FAILED',
             message: channelResult.error?.message || 'Delivery failed',
@@ -456,7 +456,7 @@ export class NotificationDeliveryManager {
       }
 
       return {
-        success: true,
+        success: true as const,
         deliveryId: channelResult.deliveryId || deliveryId,
         eventId: channelResult.eventId,
         messageId: channelResult.messageId || rawRecord.messageId,
@@ -469,12 +469,12 @@ export class NotificationDeliveryManager {
     // 5. In-flight local process concurrency check
     if (this.inFlightClaims.has(deliveryId)) {
       return {
-        success: false,
+        success: false as const,
         deliveryId,
         eventId: rawRecord.eventId,
         messageId: rawRecord.messageId,
         channel,
-        status: 'rejected',
+        status: 'rejected' as const,
         error: {
           code: 'DELIVERY_IN_PROGRESS',
           message: `Delivery for ${deliveryId} is currently in progress`,
@@ -509,12 +509,12 @@ export class NotificationDeliveryManager {
               return {
                 status: 'resolved' as const,
                 result: {
-                  success: true,
+                  success: true as const,
                   deliveryId,
                   eventId: rawRecord.eventId,
                   messageId: existing.messageId || rawRecord.messageId,
                   channel,
-                  status: 'already_delivered',
+                  status: 'already_delivered' as const,
                   deliveredAt: existing.deliveredAt || Date.now(),
                 },
               };
@@ -526,12 +526,12 @@ export class NotificationDeliveryManager {
                 return {
                   status: 'resolved' as const,
                   result: {
-                    success: false,
+                    success: false as const,
                     deliveryId,
                     eventId: rawRecord.eventId,
                     messageId: rawRecord.messageId,
                     channel,
-                    status: 'rejected',
+                    status: 'rejected' as const,
                     error: {
                       code: 'DELIVERY_IN_PROGRESS',
                       message: 'Delivery claim is actively held by another process (delivery in progress)',
@@ -675,12 +675,12 @@ export class NotificationDeliveryManager {
         }
         this.inFlightClaims.delete(deliveryId);
         return {
-          success: true,
+          success: true as const,
           deliveryId,
           eventId: rawRecord.eventId,
           messageId: lateCheck.id,
           channel,
-          status: 'already_delivered',
+          status: 'already_delivered' as const,
           deliveredAt: lateCheck.ts,
         };
       }
@@ -736,7 +736,7 @@ export class NotificationDeliveryManager {
       this.inFlightClaims.delete(deliveryId);
 
       return {
-        success: true,
+        success: true as const,
         deliveryId,
         eventId: rawRecord.eventId,
         messageId: rawRecord.messageId,
@@ -761,7 +761,7 @@ export class NotificationDeliveryManager {
       }
 
       return {
-        success: false,
+        success: false as const,
         deliveryId,
         eventId: rawRecord.eventId,
         messageId: rawRecord.messageId,
