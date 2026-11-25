@@ -1298,7 +1298,7 @@ export async function executeActionTagsAsync(
         status: "failed",
         message: `Could not delete reminders.`,
         failedKeys,
-        structuredResult: { count: 0, targetIds: intendedIds, successfulIds: [], failedIds: intendedIds },
+        structuredResult: { count: 0, targetIds, successfulIds: [], failedIds },
       });
     } else if (successfulIds.length === targetIds.length) {
       if (hits.length > 1) {
