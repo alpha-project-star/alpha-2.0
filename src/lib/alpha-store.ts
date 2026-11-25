@@ -415,7 +415,7 @@ function collectLegacyStorageKeys(storage: Storage): string[] {
   // unscoped .v1 form; keys already ending in a UID remain account-specific.
   for (let index = 0; index < storage.length; index++) {
     const key = storage.key(index);
-    if (key && /^alpha\\.(?:chat_session|internal_session)\\..+\\.v1$/.test(key)) {
+    if (key && /^alpha\.(?:chat_session|internal_session)\..+\.v1$/.test(key)) {
       keys.add(key);
     }
   }
