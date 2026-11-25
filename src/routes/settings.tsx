@@ -47,6 +47,7 @@ import {
   downloadAlphaData,
   exportAlphaData,
   importAlphaData,
+  importLegacyMusicForCurrentUser,
   wipeAlphaData,
 } from "../lib/data-portability";
 import { toast } from "sonner";
@@ -1009,14 +1010,15 @@ function SettingsRoute() {
                 <button
                   type="button"
                   disabled={auth.status !== "authenticated"}
-                  onClick={() => {
+                  onClick={async () => {
                     const accepted = confirm(
                       "Import the old shared Alpha data into the currently signed-in account? This may include records created while using another account. Existing account data will not be overwritten, and the old copy will be retained."
                     );
                     if (!accepted) return;
                     try {
                       const result = importLegacyStorageForCurrentUser();
-                      setDataStatus(`Legacy import complete: ${result.imported.length} copied, ${result.skipped.length} already had account data. Original legacy data was retained.`);
+                      const musicCopied = await importLegacyMusicForCurrentUser();
+                      setDataStatus(`Legacy import complete: ${result.imported.length} storage bucket(s) and ${musicCopied} music track(s) copied; ${result.skipped.length} existing account bucket(s) left unchanged. Original legacy data was retained.`);
                       toast.success("Legacy data copied into this account.");
                     } catch (error: any) {
                       setDataStatus(`Legacy import failed: ${error?.message || "unknown error"}`);
