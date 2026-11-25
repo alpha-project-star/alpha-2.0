@@ -4,7 +4,7 @@
  * background cloud backup, and cross-device sync.
  */
 
-import { doc, setDoc, deleteDoc, onSnapshot, collection } from "firebase/firestore";
+import { doc, setDoc, deleteDoc, onSnapshot, collection, getDocs, writeBatch } from "firebase/firestore";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { db, auth, handleFirestoreError, OperationType } from "./firebase";
 import { alphaStore, getStorage, getKey, type Memory, type Note, type Task, type Bill, type Goal } from "./alpha-store";
@@ -139,6 +139,46 @@ export async function deleteDocFromCloud(
     console.warn(`[CloudSync] Background delete from ${path} failed:`, err?.message || err);
     return false;
   }
+}
+
+
+/**
+ * Deletes the signed-in user's cloud-owned Alpha collections in bounded batches.
+ * This is deliberately UID-bound and refuses to act for a different auth user.
+ */
+export async function wipeAccountCloudData(uid: string): Promise<void> {
+  const user = auth.currentUser;
+  if (!uid || !user || user.uid !== uid) {
+    throw new Error("Cloud wipe refused: the active account does not match the requested UID.");
+  }
+
+  const collectionsToClear = [
+    "memories",
+    "notes",
+    "tasks",
+    "bills",
+    "goals",
+    "reminders",
+    "acknowledgements",
+    "notificationDiagnostics",
+    "pushSubscriptions",
+  ];
+
+  for (const collectionName of collectionsToClear) {
+    const snapshot = await getDocs(collection(db, "users", uid, collectionName));
+    for (let offset = 0; offset < snapshot.docs.length; offset += 400) {
+      const batch = writeBatch(db);
+      snapshot.docs.slice(offset, offset + 400).forEach((document) => batch.delete(document.ref));
+      await batch.commit();
+    }
+  }
+
+  await deleteDoc(doc(db, "users", uid, "migration", "state"));
+  const metadata = readSyncMetadata(uid);
+  for (const collectionName of ["memories", "notes", "tasks", "bills", "goals"] as SyncCollection[]) {
+    metadata[collectionName] = [];
+  }
+  writeSyncMetadata(uid, metadata);
 }
 
 export function initCloudSync(): () => void {
