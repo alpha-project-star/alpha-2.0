@@ -185,6 +185,9 @@ export const K = {
   settings: "alpha.settings.v1",
   summary: "alpha.summary.v1",
   composerText: "alpha.composerText.v1",
+  reminderContext: "alpha.reminder_context.v1",
+  deliveries: "alpha.deliveries.v1",
+  acknowledgements: "alpha.acknowledgements.v1",
 };
 
 const DEFAULT_SETTINGS: Settings = {
@@ -348,7 +351,6 @@ export const ALPHA_USER_KEY_PREFIXES: readonly string[] = [
   ...Object.values(K),
   "alpha.reminders.v1",
   "alpha.deliveries.v1",
-  "alpha.reminder_context.v1",
   "alpha.cloudSync.v1",
   "alpha.nextSeq.v1",
   "alpha.proactive.lastBrief",
