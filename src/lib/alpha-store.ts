@@ -403,13 +403,28 @@ export function setStoreUser(uid: string | null) {
 }
 
 /** Returns unscoped legacy Alpha keys without modifying or deleting them. */
+function collectLegacyStorageKeys(storage: Storage): string[] {
+  const keys = new Set<string>();
+  for (const prefix of ALPHA_USER_KEY_PREFIXES) {
+    const value = storage.getItem(prefix);
+    if (value !== null && value.trim() !== "") keys.add(prefix);
+  }
+
+  // Session records used dynamic base keys before UID scoping. Only import the
+  // unscoped .v1 form; keys already ending in a UID remain account-specific.
+  for (let index = 0; index < storage.length; index++) {
+    const key = storage.key(index);
+    if (key && /^alpha\\.(?:chat_session|internal_session)\\..+\\.v1$/.test(key)) {
+      keys.add(key);
+    }
+  }
+  return Array.from(keys);
+}
+
+/** Returns unscoped legacy Alpha keys without modifying or deleting them. */
 export function getLegacyStorageKeys(): string[] {
   const storage = getStorage();
-  if (!storage) return [];
-  return ALPHA_USER_KEY_PREFIXES.filter((prefix) => {
-    const value = storage.getItem(prefix);
-    return value !== null && value.trim() !== "";
-  });
+  return storage ? collectLegacyStorageKeys(storage) : [];
 }
 
 /**
@@ -424,7 +439,7 @@ export function importLegacyStorageForCurrentUser(): { imported: string[]; skipp
   const imported: string[] = [];
   const skipped: string[] = [];
 
-  for (const prefix of ALPHA_USER_KEY_PREFIXES) {
+  for (const prefix of collectLegacyStorageKeys(storage)) {
     const legacyValue = storage.getItem(prefix);
     if (legacyValue === null || legacyValue.trim() === "") continue;
     const scopedKey = getKey(prefix, currentStoreUid);
