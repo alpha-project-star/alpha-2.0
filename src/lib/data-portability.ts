@@ -569,57 +569,57 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
 export async function wipeAlphaData() {
   const currentUid = getCurrentStoreUser();
   if (currentUid === "unauthenticated") throw new Error("Sign in before wiping account data.");
-  return await withCrossContextLock(`alpha_account_wipe_lock.${currentUid}`, async () => {
-    const errors: string[] = [];
 
-    // 1. Clear localStorage keys
-    try {
-      const keysToRemove: string[] = [];
-      for (let i = 0; i < window.localStorage.length; i++) {
-        const key = window.localStorage.key(i);
-        if (key && isKeyForUid(key, currentUid)) {
-          keysToRemove.push(key);
+  const cloudSync = await import("./cloud-sync");
+  cloudSync.pauseCloudSyncForAccount(currentUid);
+  try {
+    // Remove cloud records first. If the cloud operation fails, local data is
+    // left intact so the user can retry without losing the only remaining copy.
+    await cloudSync.wipeAccountCloudData(currentUid);
+
+    return await withCrossContextLock(`alpha_account_wipe_lock.${currentUid}`, async () => {
+      const errors: string[] = [];
+
+      try {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const key = window.localStorage.key(i);
+          if (key && isKeyForUid(key, currentUid)) keysToRemove.push(key);
         }
+        for (const key of keysToRemove) window.localStorage.removeItem(key);
+      } catch (err: unknown) {
+        errors.push(`Failed to clear account local storage: ${err instanceof Error ? err.message : String(err)}`);
       }
-      for (const key of keysToRemove) {
-        window.localStorage.removeItem(key);
+
+      try {
+        await reminderRepository.replaceReminders(currentUid, []);
+      } catch (err: unknown) {
+        errors.push(`Failed to clear account reminders: ${err instanceof Error ? err.message : String(err)}`);
       }
-    } catch (err: unknown) {
-      errors.push(`Failed to clear local storage: ${err instanceof Error ? err.message : String(err)}`);
-    }
 
-    // 2. Clear canonical reminders
-    try {
-      const reminderRepo = reminderRepository;
-      await reminderRepo.replaceReminders(currentUid, []);
-    } catch (err: unknown) {
-      errors.push(`Failed to clear canonical reminders: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    // 3. Clear IndexedDB music
-    try {
-      const db = await openDb();
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(STORE, "readwrite");
-        const store = tx.objectStore(STORE);
-        const req = store.clear();
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error || new Error("Could not clear music."));
-        tx.oncomplete = () => db.close();
-      });
-    } catch (err: unknown) {
-      errors.push(`Failed to clear music store: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    if (errors.length > 0) {
-      throw new Error(`Wipe operation failed:\n${errors.join("\n")}`);
-    }
-
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("alpha:reminders-changed"));
-      if (typeof window.location?.reload === "function") {
-        window.location.reload();
+      try {
+        const db = await openDb();
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction(STORE, "readwrite");
+          tx.objectStore(STORE).clear();
+          tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => { db.close(); reject(tx.error || new Error("Could not clear music.")); };
+          tx.onabort = () => { db.close(); reject(tx.error || new Error("Music wipe was aborted.")); };
+        });
+      } catch (err: unknown) {
+        errors.push(`Failed to clear account music: ${err instanceof Error ? err.message : String(err)}`);
       }
-    }
-  });
+
+      if (errors.length > 0) {
+        throw new Error(`Account wipe was incomplete:\n${errors.join("\n")}`);
+      }
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("alpha:reminders-changed"));
+        if (typeof window.location?.reload === "function") window.location.reload();
+      }
+    });
+  } finally {
+    cloudSync.resumeCloudSyncForAccount(currentUid);
+  }
 }
