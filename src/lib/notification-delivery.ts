@@ -1,6 +1,6 @@
 // src/lib/notification-delivery.ts
 
-import { alphaStore, getStorage, type ChatMessage } from './alpha-store';
+import { alphaStore, getStorage, getKey, getCurrentStoreUser, type ChatMessage } from './alpha-store';
 import { waitForChatIdle } from './alpha.functions';
 import { reminderContextManager } from './reminder-context';
 import { notificationAcknowledgementManager } from './notification-acknowledgement';
@@ -591,12 +591,12 @@ export class NotificationDeliveryManager {
         return {
           status: 'resolved' as const,
           result: {
-            success: true,
+            success: true as const,
             deliveryId,
             eventId: rawRecord.eventId,
             messageId: chatMsg.id,
             channel,
-            status: 'already_delivered',
+            status: 'already_delivered' as const,
             deliveredAt: chatMsg.ts,
           },
         };
