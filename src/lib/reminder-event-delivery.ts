@@ -209,10 +209,11 @@ export class ReminderEventDelivery {
             dueAt: event.dueAt
           });
           
-          if (this.repo) {
-            const reminder = await this.repo.getReminder(authenticatedUserId, event.reminderId);
+          const reminderRepo = this.repo;
+          if (reminderRepo) {
+            const reminder = await reminderRepo.getReminder(authenticatedUserId, event.reminderId);
             if (reminder) {
-              await this.repo.updateReminder(authenticatedUserId, event.reminderId, {
+              await reminderRepo.updateReminder(authenticatedUserId, event.reminderId, {
                 nextRepeatAt: Date.now() + 10000,
                 repetitionCount: (reminder.repetitionCount || 0) + 1,
               });
