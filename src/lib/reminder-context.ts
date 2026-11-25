@@ -6,7 +6,7 @@
 
 import { FirestoreReminder } from './reminder-repo';
 import { withCrossContextLock } from './cross-context-lock';
-import { getStorage, getKey, getCurrentStoreUser } from './alpha-store';
+import { getStorage, getKey } from './alpha-store';
 
 const LS_KEY = 'alpha.reminder_context.v1';
 
@@ -39,10 +39,9 @@ export type ReminderContextInput =
 class ReminderContextManager {
   private activeContext: ActiveReminderContext | null = null;
   private pendingClarification: { userId: string; data: PendingClarificationData } | null = null;
-  private currentUserId: string;
+  private currentUserId: string = "unauthenticated";
 
   constructor() {
-    this.currentUserId = getCurrentStoreUser();
     this.reload(this.currentUserId);
   }
 
