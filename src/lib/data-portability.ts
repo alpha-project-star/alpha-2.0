@@ -610,6 +610,9 @@ export async function wipeAlphaData() {
         errors.push(`Failed to clear account music: ${err instanceof Error ? err.message : String(err)}`);
       }
 
+      const { alphaStore } = await import("./alpha-store");
+      alphaStore.reloadFromStorage();
+
       if (errors.length > 0) {
         throw new Error(`Account wipe was incomplete:\n${errors.join("\n")}`);
       }
