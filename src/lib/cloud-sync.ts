@@ -7,7 +7,7 @@
 import { doc, setDoc, deleteDoc, onSnapshot, collection } from "firebase/firestore";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { db, auth, handleFirestoreError, OperationType } from "./firebase";
-import { alphaStore, type Memory, type Note, type Task, type Bill, type Goal, type Profile } from "./alpha-store";
+import { alphaStore, getStorage, getKey, type Memory, type Note, type Task, type Bill, type Goal } from "./alpha-store";
 
 let activeUnsubscribers: Array<() => void> = [];
 let currentSyncedUid: string | null = null;
@@ -24,18 +24,58 @@ function stableSerialize(value: unknown): string {
   return JSON.stringify(value) ?? "undefined";
 }
 
+type SyncCollection = "memories" | "notes" | "tasks" | "bills" | "goals";
+type SyncStateKey = "memories" | "notes" | "tasks" | "bills" | "goals";
+type SyncMetadata = Partial<Record<SyncCollection, string[]>>;
+const SYNC_METADATA_KEY = "alpha.cloudSync.v1";
+
+function readSyncMetadata(uid: string): SyncMetadata {
+  const storage = getStorage();
+  if (!storage) return {};
+  try {
+    const raw = storage.getItem(getKey(SYNC_METADATA_KEY, uid));
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSyncMetadata(uid: string, metadata: SyncMetadata): void {
+  const storage = getStorage();
+  if (!storage) return;
+  try {
+    storage.setItem(getKey(SYNC_METADATA_KEY, uid), JSON.stringify(metadata));
+  } catch (error) {
+    console.warn("[CloudSync] Could not persist sync metadata:", error);
+  }
+}
+
+function markKnownRemoteId(uid: string, collectionName: SyncCollection, id: string): void {
+  const metadata = readSyncMetadata(uid);
+  const ids = new Set(metadata[collectionName] || []);
+  ids.add(id);
+  metadata[collectionName] = Array.from(ids);
+  writeSyncMetadata(uid, metadata);
+}
+
+function unmarkKnownRemoteId(uid: string, collectionName: SyncCollection, id: string): void {
+  const metadata = readSyncMetadata(uid);
+  metadata[collectionName] = (metadata[collectionName] || []).filter((knownId) => knownId !== id);
+  writeSyncMetadata(uid, metadata);
+}
+
 export async function syncDocToCloud(
-  collectionName: "memories" | "notes" | "tasks" | "bills" | "goals",
+  collectionName: SyncCollection,
   id: string,
   data: any
-): Promise<void> {
+): Promise<boolean> {
   const user = auth.currentUser;
-  if (!user || !user.uid || !id) return;
+  if (!user || !user.uid || !id) return false;
 
-  const path = `users/${user.uid}/${collectionName}/${id}`;
+  const uid = user.uid;
+  const path = `users/${uid}/${collectionName}/${id}`;
   try {
-    // Keep the app's local model intact while also satisfying the canonical
-    // Firestore rules schema. The extra local fields are retained for round trips.
     const source = data && typeof data === "object" ? data : {};
     const createdAt =
       typeof source.createdAt === "number" ? source.createdAt :
@@ -43,7 +83,7 @@ export async function syncDocToCloud(
     const payload: Record<string, unknown> = {
       ...source,
       id,
-      userId: user.uid,
+      userId: uid,
       createdAt,
     };
 
@@ -73,26 +113,31 @@ export async function syncDocToCloud(
       payload.amount = amount;
     }
 
-    const docRef = doc(db, "users", user.uid, collectionName, id);
-    await setDoc(docRef, payload, { merge: true });
+    await setDoc(doc(db, "users", uid, collectionName, id), payload, { merge: true });
+    markKnownRemoteId(uid, collectionName, id);
+    return true;
   } catch (err: any) {
-    console.warn(`[CloudSync] Background sync to ${path} failed (offline or unauthenticated):`, err?.message || err);
+    console.warn(`[CloudSync] Background sync to ${path} failed:`, err?.message || err);
+    return false;
   }
 }
 
 export async function deleteDocFromCloud(
-  collectionName: "memories" | "notes" | "tasks" | "bills" | "goals",
+  collectionName: SyncCollection,
   id: string
-): Promise<void> {
+): Promise<boolean> {
   const user = auth.currentUser;
-  if (!user || !user.uid || !id) return;
+  if (!user || !user.uid || !id) return false;
 
-  const path = `users/${user.uid}/${collectionName}/${id}`;
+  const uid = user.uid;
+  const path = `users/${uid}/${collectionName}/${id}`;
   try {
-    const docRef = doc(db, "users", user.uid, collectionName, id);
-    await deleteDoc(docRef);
+    await deleteDoc(doc(db, "users", uid, collectionName, id));
+    unmarkKnownRemoteId(uid, collectionName, id);
+    return true;
   } catch (err: any) {
     console.warn(`[CloudSync] Background delete from ${path} failed:`, err?.message || err);
+    return false;
   }
 }
 
@@ -100,92 +145,87 @@ export function initCloudSync(): () => void {
   if (typeof window === "undefined") return () => {};
 
   const unsubscribeAuth = onAuthStateChanged(auth, (user: User | null) => {
-    // Teardown previous listeners if user switched or logged out
-    activeUnsubscribers.forEach((unsub) => {
-      try {
-        unsub();
-      } catch {}
+    activeUnsubscribers.forEach((unsubscribe) => {
+      try { unsubscribe(); } catch {}
     });
     activeUnsubscribers = [];
 
-    if (!user || !user.uid) {
+    if (!user?.uid) {
       currentSyncedUid = null;
       return;
     }
 
-    currentSyncedUid = user.uid;
     const uid = user.uid;
+    currentSyncedUid = uid;
 
-    // 1. Memories Sync Listener
-    try {
-      const memoriesPath = `users/${uid}/memories`;
-      const unsubMemories = onSnapshot(
-        collection(db, "users", uid, "memories"),
-        (snapshot) => {
-          if (!snapshot.empty) {
-            const cloudMemories: Memory[] = snapshot.docs.map((d) => d.data() as Memory);
-            const localMemories = alphaStore.get().memories;
-            // Merge cloud memories with local memories
-            const mergedMap = new Map<string, Memory>();
-            localMemories.forEach((m) => mergedMap.set(m.id, m));
-            cloudMemories.forEach((m) => mergedMap.set(m.id, m));
-            const merged = Array.from(mergedMap.values());
-            if (stableSerialize(merged) !== stableSerialize(localMemories)) {
-              void alphaStore.replaceAll({ memories: merged });
-            }
-          } else {
-            // Upload existing local memories if cloud is empty
-            const local = alphaStore.get().memories;
-            local.forEach((m) => void syncDocToCloud("memories", m.id, m));
-          }
-        },
-        (error) => {
-          handleFirestoreError(error, OperationType.LIST, memoriesPath);
-        }
-      );
-      activeUnsubscribers.push(unsubMemories);
-    } catch (err) {
-      console.warn("[CloudSync] Failed to initialize memories listener:", err);
-    }
+    const collections: Array<{ name: SyncCollection; stateKey: SyncStateKey }> = [
+      { name: "memories", stateKey: "memories" },
+      { name: "notes", stateKey: "notes" },
+      { name: "tasks", stateKey: "tasks" },
+      { name: "bills", stateKey: "bills" },
+      { name: "goals", stateKey: "goals" },
+    ];
 
-    // 2. Notes Sync Listener
-    try {
-      const notesPath = `users/${uid}/notes`;
-      const unsubNotes = onSnapshot(
-        collection(db, "users", uid, "notes"),
-        (snapshot) => {
-          if (!snapshot.empty) {
-            const cloudNotes: Note[] = snapshot.docs.map((d) => d.data() as Note);
-            const localNotes = alphaStore.get().notes;
-            const mergedMap = new Map<string, Note>();
-            localNotes.forEach((n) => mergedMap.set(n.id, n));
-            cloudNotes.forEach((n) => mergedMap.set(n.id, n));
-            const merged = Array.from(mergedMap.values());
-            if (stableSerialize(merged) !== stableSerialize(localNotes)) {
-              void alphaStore.replaceAll({ notes: merged });
+    for (const entry of collections) {
+      const collectionPath = `users/${uid}/${entry.name}`;
+      try {
+        const unsubscribe = onSnapshot(
+          collection(db, "users", uid, entry.name),
+          (snapshot) => {
+            // A cache-only empty snapshot is not proof that the server collection
+            // is empty; wait for a server-backed snapshot before reconciling.
+            if (snapshot.metadata.fromCache) return;
+
+            const cloudItems = snapshot.docs.map((document) => ({
+              ...document.data(),
+              id: document.id,
+              userId: uid,
+            })) as Array<{ id: string; userId: string; [key: string]: unknown }>;
+            const cloudById = new Map(cloudItems.map((item) => [item.id, item]));
+            const localItems = (alphaStore.get()[entry.stateKey] || []) as Array<{ id: string; [key: string]: unknown }>;
+            const metadata = readSyncMetadata(uid);
+            const knownIds = new Set(metadata[entry.name] || []);
+            const mergedById = new Map<string, any>();
+
+            // A locally present ID previously known to exist remotely but now
+            // absent from the server has been deleted elsewhere. Do not resurrect it.
+            for (const localItem of localItems) {
+              if (cloudById.has(localItem.id)) continue;
+              if (knownIds.has(localItem.id)) continue;
+              mergedById.set(localItem.id, localItem);
+              void syncDocToCloud(entry.name, localItem.id, localItem);
             }
-          } else {
-            const local = alphaStore.get().notes;
-            local.forEach((n) => void syncDocToCloud("notes", n.id, n));
-          }
-        },
-        (error) => {
-          handleFirestoreError(error, OperationType.LIST, notesPath);
-        }
-      );
-      activeUnsubscribers.push(unsubNotes);
-    } catch (err) {
-      console.warn("[CloudSync] Failed to initialize notes listener:", err);
+
+            // Server values win for matching IDs and server deletions are reflected
+            // locally through the known-ID reconciliation above.
+            for (const cloudItem of cloudItems) mergedById.set(cloudItem.id, cloudItem);
+
+            const merged = Array.from(mergedById.values());
+            const nextMetadata: SyncMetadata = {
+              ...metadata,
+              [entry.name]: cloudItems.map((item) => item.id),
+            };
+            writeSyncMetadata(uid, nextMetadata);
+
+            if (stableSerialize(merged) !== stableSerialize(localItems)) {
+              void alphaStore.replaceAll({ [entry.stateKey]: merged });
+            }
+          },
+          (error) => handleFirestoreError(error, OperationType.LIST, collectionPath)
+        );
+        activeUnsubscribers.push(unsubscribe);
+      } catch (error) {
+        console.warn(`[CloudSync] Failed to initialize ${entry.name} listener:`, error);
+      }
     }
   });
 
   return () => {
     unsubscribeAuth();
-    activeUnsubscribers.forEach((u) => {
-      try {
-        u();
-      } catch {}
+    activeUnsubscribers.forEach((unsubscribe) => {
+      try { unsubscribe(); } catch {}
     });
     activeUnsubscribers = [];
+    currentSyncedUid = null;
   };
 }
