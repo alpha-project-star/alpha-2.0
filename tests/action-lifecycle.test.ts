@@ -86,6 +86,25 @@ describe("Pass A — Action Lifecycle & Action-Only Response Repair", () => {
     expect(res.toLowerCase()).toContain("enabled");
   });
 
+  it("7. Failed read-only work is not reported as a fulfilled request", () => {
+    const lifecycle = new RequestActionLifecycle();
+    const operation = lifecycle.startOperation({
+      name: "SEARCH_WEB",
+      isMutation: false,
+    });
+
+    lifecycle.recordFailure({
+      opId: operation.id,
+      name: "SEARCH_WEB",
+      isMutation: false,
+      error: new Error("Search provider unavailable"),
+    });
+
+    expect(lifecycle.hasUnresolvedWork()).toBe(true);
+    expect(lifecycle.isRequestFulfilled()).toBe(false);
+    expect(lifecycle.getState()).toBe("failed");
+  });
+
   it("8. Two-turn cross-turn isolation: Turn 1 action confirmation is stored correctly and Turn 2 has fresh lifecycle without stale action results", async () => {
     // Turn 1
     const turn1Raw = "[[SET_SETTING: autoSpeak | false]]";
