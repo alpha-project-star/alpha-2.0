@@ -204,13 +204,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MultimodalRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/multimodal': {
-      id: '/multimodal'
-      path: '/multimodal'
-      fullPath: '/multimodal'
-      preLoaderRoute: typeof MultimodalRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/notes': {
       id: '/notes'
       path: '/notes'
