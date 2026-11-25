@@ -38,13 +38,13 @@ export async function syncDocToCloud(
     if (collectionName === "memories") {
       const content = typeof source.content === "string"
         ? source.content
-        : [source.topic, source.detail].filter((part) => typeof part === "string" && part.length > 0).join("\\n");
+        : [source.topic, source.detail].filter((part) => typeof part === "string" && part.length > 0).join("\n");
       if (!content || content.length > 10000) throw new Error("Memory content is empty or exceeds the 10,000 character cloud limit.");
       payload.content = content;
     } else if (collectionName === "notes") {
       const content = typeof source.content === "string"
         ? source.content
-        : [source.title, source.body].filter((part) => typeof part === "string" && part.length > 0).join("\\n\\n");
+        : [source.title, source.body].filter((part) => typeof part === "string" && part.length > 0).join("\n\n");
       if (!content || content.length > 20000) throw new Error("Note content is empty or exceeds the 20,000 character cloud limit.");
       payload.content = content;
     } else if (collectionName === "tasks" || collectionName === "goals") {
