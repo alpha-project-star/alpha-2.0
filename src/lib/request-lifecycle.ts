@@ -283,7 +283,9 @@ export class RequestActionLifecycle {
     if (this.clarification.isPending || this.state === "needs_clarification") return true;
     if (this.activeOperation) return true;
     if (this.needsAnotherStep) return true;
-    if (this.hasFailedMutations()) return true;
+    // A failed read-only operation is still failed work: the request must
+    // not be reported as fulfilled merely because no mutation was attempted.
+    if (this.operations.some((o) => o.status === "failed")) return true;
 
     const mutations = this.operations.filter((o) => o.isMutation);
     if (mutations.length > 0) {
