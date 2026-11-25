@@ -13,6 +13,7 @@ export default function MultimodalStudio() {
   const handleGenerate = async (type: "image" | "video") => {
     setResult(null);
     const session = activity.start(type === "image" ? "generating_image" : "generating_video");
+    let failed = false;
     
     try {
       const res = type === "image" 
@@ -20,10 +21,11 @@ export default function MultimodalStudio() {
         : await generateVideo({ data: { prompt } });
       setResult(res.dataUrl);
     } catch (e) {
+      failed = true;
       session.error(e instanceof Error ? e.message : "Generation failed");
       console.error(e);
     } finally {
-      session.clear();
+      if (!failed) session.clear();
     }
   };
 
