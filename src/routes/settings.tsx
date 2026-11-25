@@ -208,7 +208,7 @@ function SettingsRoute() {
   async function handleWipe() {
     if (
       !confirm(
-        "This permanently deletes all Alpha data — chat, notes, reminders, memories, settings, and music. This cannot be undone. Continue?",
+        "This permanently deletes Alpha data for the currently signed-in account, including its cloud records. Other accounts and unscoped legacy recovery copies are left untouched. This cannot be undone. Continue?",
       )
     )
       return;
