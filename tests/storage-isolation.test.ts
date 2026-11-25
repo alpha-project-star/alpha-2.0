@@ -8,6 +8,7 @@ import {
 } from "../src/lib/alpha-store";
 import { LocalReminderRepository, type FirestoreReminder } from "../src/lib/reminder-repo";
 import { LocalAcknowledgementRepository } from "../src/lib/notification-acknowledgement";
+import { LocalDeliveryRepository, type DeliveryRecord } from "../src/lib/notification-delivery";
 import { reminderContextManager } from "../src/lib/reminder-context";
 
 function createStorageHarness() {
@@ -102,6 +103,28 @@ describe("UID-scoped local persistence", () => {
     expect(await repository.getAcknowledgement("account-A", "event-a:in_app:ack")).not.toBeNull();
     expect(await repository.getAcknowledgement("account-B", "event-a:in_app:ack")).toBeNull();
     expect(await repository.listAcknowledgements("account-B")).toEqual([]);
+  });
+
+  it("isolates notification delivery records by UID", async () => {
+    const repository = new LocalDeliveryRepository();
+    const now = Date.now();
+    const delivery: DeliveryRecord = {
+      deliveryId: "event-a:in_app",
+      eventId: "event-a",
+      reminderId: "reminder-a",
+      userId: "account-A",
+      messageId: "message-a",
+      channel: "in_app",
+      status: "delivered",
+      createdAt: now,
+      updatedAt: now,
+      retryCount: 0,
+    };
+
+    await repository.saveDelivery("account-A", delivery);
+    expect(await repository.listDeliveries("account-A")).toHaveLength(1);
+    expect(await repository.listDeliveries("account-B")).toEqual([]);
+    expect(await repository.getDelivery("account-B", delivery.deliveryId)).toBeNull();
   });
 
   it("isolates reminder conversation context by UID", async () => {
