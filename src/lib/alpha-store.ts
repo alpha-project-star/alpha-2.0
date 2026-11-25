@@ -724,7 +724,7 @@ function reloadState() {
     results: parseLS<Result[]>(K.results, z.array(z.any()), []),
     memories: parseLS<Memory[]>(K.memories, z.array(MemorySchema), []),
     profile: parseLS<Profile>(K.profile, ProfileSchema, { name: "", bio: "" }),
-    settings: parseLS<Settings>(K.settings, SettingsSchema, state?.settings || DEFAULT_SETTINGS),
+    settings: parseLS<Settings>(K.settings, SettingsSchema, DEFAULT_SETTINGS),
     composerText: parseLS<string>(K.composerText, z.string(), ""),
   };
 }
@@ -754,6 +754,11 @@ function queueCloudDelete(
 
 export const alphaStore = {
   get: () => state,
+  /** Reload the active UID's persisted data after account changes or a wipe. */
+  reloadFromStorage(): void {
+    reloadState();
+    emit();
+  },
   /** Subscribe to any persisted state change. Returns an unsubscribe fn. */
   sub: (l: () => void) => subscribe(l),
   setSettings(patch: Partial<Settings>): Promise<void> {
