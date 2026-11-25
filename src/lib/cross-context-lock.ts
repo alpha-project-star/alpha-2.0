@@ -67,9 +67,7 @@ export function withCrossContextLock<T>(
   options?: CrossContextLockOptions,
 ): Promise<T> {
   if (isCrossContextLockSupported()) {
-    return navigator.locks.request(lockName, { mode: 'exclusive' }, async () => {
-      return await fn();
-    });
+    return navigator.locks.request<T>(lockName, { mode: 'exclusive' }, () => Promise.resolve(fn()) as Promise<T>);
   }
 
   if (options?.requireCrossContextExclusion) {
