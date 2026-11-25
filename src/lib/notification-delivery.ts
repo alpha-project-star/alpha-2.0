@@ -551,12 +551,12 @@ export class NotificationDeliveryManager {
           return {
             status: 'resolved' as const,
             result: {
-              success: false,
+              success: false as const,
               deliveryId,
               eventId: rawRecord.eventId,
               messageId: rawRecord.messageId,
               channel,
-              status: 'failed',
+              status: 'failed' as const,
               error: {
                 code: 'PERSISTENCE_FAILURE',
                 message: `Failed reading delivery repository: ${err?.message}`,
