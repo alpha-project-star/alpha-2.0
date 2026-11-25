@@ -53,7 +53,7 @@ describe("UID-scoped local persistence", () => {
     setStoreUser("account-B");
     expect(alphaStore.get().settings.personaExtra).not.toBe("private account A preference");
     expect(values.get("alpha.settings.v1.account-A")).toContain("private account A preference");
-    expect(values.get("alpha.settings.v1.account-B")).toBeNull();
+    expect(values.get("alpha.settings.v1.account-B")).toBeUndefined();
   });
 
   it("keeps unscoped legacy data intact until the current user explicitly imports it", () => {
@@ -69,11 +69,11 @@ describe("UID-scoped local persistence", () => {
     expect(result.imported).toContain("alpha.chat_session.session-1.v1");
     expect(values.get("alpha.notes.v1")).toContain("legacy-note");
     expect(values.get("alpha.chat_session.session-1.v1.account-A")).toContain("legacy-message");
-    expect(values.get("alpha.cloudSync.v1.account-A")).toBeNull();
+    expect(values.get("alpha.cloudSync.v1.account-A")).toBeUndefined();
     expect(values.get("alpha.notes.v1.account-A")).toContain("legacy-note");
 
     setStoreUser("account-B");
-    expect(values.get("alpha.notes.v1.account-B")).toBeNull();
+    expect(values.get("alpha.notes.v1.account-B")).toBeUndefined();
     expect(values.get("alpha.notes.v1")).toContain("legacy-note");
   });
 
@@ -100,8 +100,8 @@ describe("UID-scoped local persistence", () => {
       updatedAt: now,
     });
 
-    expect(await repository.getAcknowledgement("account-A", "event-a:in_app:ack")).not.toBeNull();
-    expect(await repository.getAcknowledgement("account-B", "event-a:in_app:ack")).toBeNull();
+    expect(await repository.getAcknowledgement("account-A", "event-a:in_app:ack")).not.toBeUndefined();
+    expect(await repository.getAcknowledgement("account-B", "event-a:in_app:ack")).toBeUndefined();
     expect(await repository.listAcknowledgements("account-B")).toEqual([]);
   });
 
@@ -124,7 +124,7 @@ describe("UID-scoped local persistence", () => {
     await repository.saveDelivery("account-A", delivery);
     expect(await repository.listDeliveries("account-A")).toHaveLength(1);
     expect(await repository.listDeliveries("account-B")).toEqual([]);
-    expect(await repository.getDelivery("account-B", delivery.deliveryId)).toBeNull();
+    expect(await repository.getDelivery("account-B", delivery.deliveryId)).toBeUndefined();
   });
 
   it("isolates reminder conversation context by UID", async () => {
@@ -136,7 +136,7 @@ describe("UID-scoped local persistence", () => {
     });
 
     expect(reminderContextManager.getContext("account-A")?.id).toBe("reminder-context-a");
-    expect(reminderContextManager.getContext("account-B")).toBeNull();
+    expect(reminderContextManager.getContext("account-B")).toBeUndefined();
   });
 
   it("isolates reminders by UID instead of projecting another user's records", async () => {
@@ -156,6 +156,6 @@ describe("UID-scoped local persistence", () => {
     await repository.createReminder("account-A", reminder);
     expect((await repository.listReminders("account-A")).map((item) => item.id)).toEqual(["reminder-a"]);
     expect(await repository.listReminders("account-B")).toEqual([]);
-    expect(await repository.getReminder("account-B", "reminder-a")).toBeNull();
+    expect(await repository.getReminder("account-B", "reminder-a")).toBeUndefined();
   });
 });
