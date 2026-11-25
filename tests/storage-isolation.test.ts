@@ -6,6 +6,8 @@ import {
   setStoreUser,
 } from "../src/lib/alpha-store";
 import { LocalReminderRepository, type FirestoreReminder } from "../src/lib/reminder-repo";
+import { LocalAcknowledgementRepository } from "../src/lib/notification-acknowledgement";
+import { reminderContextManager } from "../src/lib/reminder-context";
 
 function createStorageHarness() {
   const values = new Map<string, string>();
@@ -65,6 +67,37 @@ describe("UID-scoped local persistence", () => {
     const result = importLegacyStorageForCurrentUser();
     expect(result.skipped).toContain("alpha.notes.v1");
     expect(values.get("alpha.notes.v1.account-A")).toContain("account-note");
+  });
+
+  it("isolates acknowledgement history by UID", async () => {
+    const repository = new LocalAcknowledgementRepository();
+    const now = Date.now();
+    await repository.saveAcknowledgement("account-A", {
+      ackId: "event-a:in_app:ack",
+      eventId: "event-a",
+      reminderId: "reminder-a",
+      userId: "account-A",
+      channel: "in_app",
+      status: "acknowledged",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    expect(await repository.getAcknowledgement("account-A", "event-a:in_app:ack")).not.toBeNull();
+    expect(await repository.getAcknowledgement("account-B", "event-a:in_app:ack")).toBeNull();
+    expect(await repository.listAcknowledgements("account-B")).toEqual([]);
+  });
+
+  it("isolates reminder conversation context by UID", async () => {
+    await reminderContextManager.setContext("account-A", {
+      id: "reminder-context-a",
+      userId: "account-A",
+      title: "Private reminder",
+      dueAt: Date.now() + 60_000,
+    });
+
+    expect(reminderContextManager.getContext("account-A")?.id).toBe("reminder-context-a");
+    expect(reminderContextManager.getContext("account-B")).toBeNull();
   });
 
   it("isolates reminders by UID instead of projecting another user's records", async () => {
