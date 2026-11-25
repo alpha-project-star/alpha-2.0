@@ -1,27 +1,12 @@
 /**
- * ============================================================================
- * ARCHITECTURAL AUTHORITY DECLARATION — AL-02 RECONCILIATION
- * ============================================================================
- * ROLE: Conversational Reminder Context Manager
- * AUTHORITATIVE SYMBOL: ReminderContextManager (reminderContextManager)
- *
- * RESPONSIBILITIES:
- *  - Tracks the currently active conversational focus/context for reminders
- *    per authenticated user in-memory.
- *  - Enforces strict user isolation (clears context on mismatched user ID access).
- *  - Provides immediate conversational lookup and context clearing/invalidation.
- *
- * NOT RESPONSIBLE FOR:
- *  - Planning or decomposition structures (owned by `src/lib/execution.ts`).
- *  - Action-tag coordination and execution sequencing (owned by `src/lib/actions.ts`).
- *  - Canonical reminder repository persistence (owned by `src/lib/reminder-repo.ts`).
- * ============================================================================
+ * Per-user conversational reminder focus and clarification state.
+ * Persistence is namespaced by Firebase UID; unscoped legacy data is not read
+ * automatically because its owner cannot be inferred safely.
  */
 
 import { FirestoreReminder } from './reminder-repo';
-import { formatReminderDate } from './reminder-date-utils';
 import { withCrossContextLock } from './cross-context-lock';
-import { getStorage } from './alpha-store';
+import { getStorage, getKey, getCurrentStoreUser } from './alpha-store';
 
 const LS_KEY = 'alpha.reminder_context.v1';
 
@@ -29,7 +14,7 @@ export interface ActiveReminderContext {
   id: string;
   title: string;
   dueAt: number;
-    userId: string;
+  userId: string;
   notes?: string;
   updatedAt: number;
 }
@@ -41,120 +26,125 @@ export interface PendingClarificationData {
   hour: number;
 }
 
-export type ReminderContextInput = 
-  | FirestoreReminder 
+export type ReminderContextInput =
+  | FirestoreReminder
   | {
       id: string;
       title: string;
       dueAt: number;
-            userId?: string;
+      userId?: string;
       notes?: string;
     };
 
-/**
- * Authoritative in-memory conversational reminder context manager.
- * Tracks the current reminder in conversational focus per authenticated user.
- * Enforces strict user isolation: access attempts with a different userId clear context.
- */
 class ReminderContextManager {
   private activeContext: ActiveReminderContext | null = null;
   private pendingClarification: { userId: string; data: PendingClarificationData } | null = null;
-  private currentUserId: string | null = null;
+  private currentUserId: string;
 
   constructor() {
-    this.reload();
+    this.currentUserId = getCurrentStoreUser();
+    this.reload(this.currentUserId);
   }
 
-  private getStorageKey(userId: string | null): string {
-    // All reminder contexts now use the stable canonical base key.
-    return LS_KEY;
+  private getStorageKey(userId: string): string {
+    return getKey(LS_KEY, userId);
   }
 
-  private reload(userId?: string) {
+  private reload(userId: string = this.currentUserId): void {
     const storage = getStorage();
+    this.currentUserId = userId;
+    this.activeContext = null;
+    this.pendingClarification = null;
     if (!storage) return;
-    const key = this.getStorageKey(null);
+
     try {
-      const v = storage.getItem(key);
-      if (v) {
-        const parsed = JSON.parse(v);
-        this.activeContext = parsed.context;
-        this.pendingClarification = parsed.pendingClarification || null;
-        this.currentUserId = "local-user";
+      const raw = storage.getItem(this.getStorageKey(userId));
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const context = parsed?.context;
+      const pending = parsed?.pendingClarification;
+      if (context && typeof context.id === 'string' && context.userId === userId) {
+        this.activeContext = context as ActiveReminderContext;
       }
-    } catch {
-      this.clear();
+      if (pending && pending.userId === userId && pending.data) {
+        this.pendingClarification = pending;
+      }
+    } catch (error) {
+      console.warn('[ReminderContext] Could not read user context:', error);
     }
   }
 
-  private save() {
+  private save(): void {
     const storage = getStorage();
     if (!storage) return;
-    const key = this.getStorageKey(null);
+    const key = this.getStorageKey(this.currentUserId);
     try {
       if (this.activeContext || this.pendingClarification) {
         storage.setItem(key, JSON.stringify({
           context: this.activeContext,
           pendingClarification: this.pendingClarification,
-          userId: "local-user"
+          userId: this.currentUserId,
         }));
       } else {
         storage.removeItem(key);
       }
-    } catch {}
+    } catch (error) {
+      console.warn('[ReminderContext] Could not persist user context:', error);
+    }
   }
 
-  async setContext(userId: string, reminder: ReminderContextInput) {
-    await withCrossContextLock('alpha_lock_reminder_context', async () => {
-      this.currentUserId = "local-user";
+  async setContext(userId: string, reminder: ReminderContextInput): Promise<void> {
+    await withCrossContextLock(`alpha_lock_reminder_context.${userId}`, async () => {
+      this.reload(userId);
       this.activeContext = {
         id: reminder.id,
         title: reminder.title,
         dueAt: reminder.dueAt,
-        userId: "local-user",
-        notes: (reminder as any).notes,
-        updatedAt: Date.now()
+        userId,
+        notes: reminder.notes,
+        updatedAt: Date.now(),
       };
       this.save();
     });
   }
 
   getContext(userId: string): ActiveReminderContext | null {
-    this.reload();
+    this.reload(userId);
     return this.activeContext;
   }
 
-  async setPendingClarification(userId: string, data: PendingClarificationData) {
-    await withCrossContextLock('alpha_lock_reminder_context', async () => {
-      this.currentUserId = "local-user";
-      this.pendingClarification = { userId: "local-user", data };
+  async setPendingClarification(userId: string, data: PendingClarificationData): Promise<void> {
+    await withCrossContextLock(`alpha_lock_reminder_context.${userId}`, async () => {
+      this.reload(userId);
+      this.pendingClarification = { userId, data };
       this.save();
     });
   }
 
   getPendingClarification(userId: string): PendingClarificationData | null {
-    this.reload();
-    return this.pendingClarification?.data || null;
+    this.reload(userId);
+    return this.pendingClarification?.userId === userId ? this.pendingClarification.data : null;
   }
 
-  clearPendingClarification(userId: string) {
-    this.reload();
+  clearPendingClarification(userId: string): void {
+    this.reload(userId);
     this.pendingClarification = null;
     this.save();
   }
 
-  clear() {
+  clear(userId: string = this.currentUserId): void {
+    this.currentUserId = userId;
     this.activeContext = null;
     this.pendingClarification = null;
-    this.currentUserId = "local-user";
     this.save();
   }
 
-  async invalidate(userId: string, reminderId: string) {
-    await withCrossContextLock('alpha_lock_reminder_context', async () => {
-      this.reload();
+  async invalidate(userId: string, reminderId: string): Promise<void> {
+    await withCrossContextLock(`alpha_lock_reminder_context.${userId}`, async () => {
+      this.reload(userId);
       if (this.activeContext?.id === reminderId) {
-        this.clear();
+        this.activeContext = null;
+        this.save();
       }
     });
   }
