@@ -298,7 +298,10 @@ export class LocalReminderRepository implements ReminderRepository {
   async listReminders(userId: string): Promise<FirestoreReminder[]> {
     if (this.shouldFail) throw new Error(this.failureError);
     const map = this.load("local-user");
-    return Array.from(map.values());
+    // Persistence is intentionally browser-local, but scheduler/event APIs
+    // operate in the authenticated user's namespace. Project the caller's
+    // identity on reads so ownership checks remain consistent end-to-end.
+    return Array.from(map.values(), (item) => ({ ...item, userId }));
   }
 
   async getReminder(userId: string, reminderId: string): Promise<FirestoreReminder | null> {
@@ -306,7 +309,7 @@ export class LocalReminderRepository implements ReminderRepository {
     const map = this.load("local-user");
     const item = map.get(reminderId);
     if (!item) return null;
-    return { ...item };
+    return { ...item, userId };
   }
 
   async createReminder(userId: string, reminder: FirestoreReminder): Promise<void> {
