@@ -611,7 +611,7 @@ export class AlphaCoreAuthority {
     if (!parsed.success) {
       return {
         success: false,
-        reason: `Schema validation failed on Core mutation: ${parsed.error.errors.map((e) => e.message).join(", ")}`,
+        reason: `Schema validation failed on Core mutation: ${parsed.error.issues.map((e) => e.message).join(", ")}`,
       };
     }
 
@@ -747,7 +747,7 @@ export class AlphaCoreAuthority {
     if (!parsed.success) {
       return {
         valid: false,
-        errors: parsed.error.errors.map((e) => `${e.path.join(".")}: ${e.message}`),
+        errors: parsed.error.issues.map((e) => `${e.path.join(".")}: ${e.message}`),
       };
     }
     return { valid: true, errors: [] };
