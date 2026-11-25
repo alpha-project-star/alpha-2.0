@@ -341,6 +341,7 @@ export class LocalReminderRepository implements ReminderRepository {
       const updated: FirestoreReminder = {
         ...existing,
         ...patch,
+        userId,
         updatedAt: Date.now(),
       };
       const nextMap = new Map(map);
@@ -383,23 +384,11 @@ export class LocalReminderRepository implements ReminderRepository {
     if (this.shouldFail) throw new Error(this.failureError);
     await withCrossContextLock(this.storageKey(userId), async () => {
       const nextMap = new Map<string, FirestoreReminder>();
-      for (const r of reminders) {
-        nextMap.set(r.id, {
-          ...r,
-          userId,
-          updatedAt: Date.now(),
-        });
+      for (const reminder of reminders) {
+        if (reminder.userId !== userId) throw new Error("User ID mismatch");
+        nextMap.set(reminder.id, { ...reminder });
       }
       this.save(userId, nextMap);
-      // Update in-memory store for matching userId
-      for (const [id, r] of this.store.entries()) {
-        if (r.userId === "local-user") {
-          this.store.delete(id);
-        }
-      }
-      for (const [id, r] of nextMap.entries()) {
-        this.store.set(id, r);
-      }
     });
   }
 }
