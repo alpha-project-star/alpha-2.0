@@ -306,8 +306,12 @@ export class RequestActionLifecycle {
     }
     const failedMutations = this.operations.filter((o) => o.isMutation && o.status === "failed");
     const completedMutations = this.operations.filter((o) => o.isMutation && o.status === "completed");
+    const hasFailedOperations = this.operations.some((o) => o.status === "failed");
 
     if (failedMutations.length > 0 && completedMutations.length === 0) {
+      this.state = "failed";
+    } else if (hasFailedOperations && !this.activeOperation && !this.needsAnotherStep) {
+      // Read-only failures are still request failures, even when no mutation ran.
       this.state = "failed";
     } else if (completedMutations.length > 0 && failedMutations.length === 0 && !this.activeOperation && !this.needsAnotherStep) {
       this.state = "completed";
