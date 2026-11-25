@@ -244,7 +244,9 @@ export class LocalReminderRepository implements ReminderRepository {
 
     // Case 1: No stored reminder data (missing key or genuinely empty string)
     if (raw === null || raw.trim() === "") {
-      return new Map();
+      const empty = new Map<string, FirestoreReminder>();
+      this.store = empty;
+      return empty;
     }
 
     // Case 2 & 3: Parse and validate stored JSON
@@ -271,6 +273,7 @@ export class LocalReminderRepository implements ReminderRepository {
       }
       map.set(reminder.id, reminder);
     }
+    this.store = map;
     return map;
   }
 
@@ -286,6 +289,7 @@ export class LocalReminderRepository implements ReminderRepository {
     }
     const key = this.storageKey(userId);
     const list = Array.from(map.values());
+    this.store = map;
     try {
       storage.setItem(key, JSON.stringify(list));
       if (typeof window !== 'undefined') {
