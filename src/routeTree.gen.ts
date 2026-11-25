@@ -117,7 +117,6 @@ export interface FileRouteTypes {
     | '/image'
     | '/memories'
     | '/multimodal'
-     | '/multimodal'
     | '/notes'
     | '/plans'
     | '/reminders'
