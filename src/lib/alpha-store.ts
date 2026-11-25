@@ -555,6 +555,8 @@ if (typeof window !== "undefined") {
 
 let state: AlphaState = {
   chat: parseLS<ChatMessage[]>(K.chat, z.array(ChatMessageSchema), []),
+  sessions: parseLS<ChatSession[]>(K.sessions, z.array(ChatSessionSchema), [{ id: "default", title: "Main Conversation", createdAt: Date.now(), updatedAt: Date.now() }]),
+  activeSessionId: parseLS<string>(K.activeSessionId, z.string(), "default"),
   internalHistory: parseLS<ChatMessage[]>(K.internalHistory, z.array(ChatMessageSchema), []),
   notes: parseLS<Note[]>(K.notes, z.array(NoteSchema), []),
   bills: parseLS<Bill[]>(K.bills, z.array(BillSchema), []),
@@ -655,6 +657,7 @@ if (typeof window !== "undefined") {
 }
 
 const getSnapshot = () => state;
+const serverSnap: AlphaState = state;
 const getServerSnapshot = () => serverSnap;
 
 export function useAlpha<T>(selector: (s: AlphaState) => T): T {
@@ -904,8 +907,8 @@ export const alphaStore = {
 
       const storage = getStorage();
       try {
-        storage?.removeItem(getScopedKey(`alpha.chat_session.${sessionId}.v1`));
-        storage?.removeItem(getScopedKey(`alpha.internal_session.${sessionId}.v1`));
+        storage?.removeItem(getKey(`alpha.chat_session.${sessionId}.v1`));
+        storage?.removeItem(getKey(`alpha.internal_session.${sessionId}.v1`));
       } catch {}
 
       writeLS(K.sessions, remainingSessions);
