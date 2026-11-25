@@ -119,7 +119,7 @@ export class InMemoryAcknowledgementRepository implements AcknowledgementReposit
   }
 
   async updateAcknowledgement(userId: string, ackId: string, patch: Partial<AcknowledgementRecord>): Promise<void> {
-    const record = this.store.get(ackId);
+    const record = this.store.get(this.key(userId, ackId));
     if (!record || record.userId !== userId) throw new Error('Acknowledgement record not found');
     this.store.set(this.key(userId, ackId), { ...record, ...patch, userId, updatedAt: Date.now() });
   }
