@@ -406,6 +406,7 @@ export function setStoreUser(uid: string | null) {
 function collectLegacyStorageKeys(storage: Storage): string[] {
   const keys = new Set<string>();
   for (const prefix of ALPHA_USER_KEY_PREFIXES) {
+    if (prefix === "alpha.cloudSync.v1") continue;
     const value = storage.getItem(prefix);
     if (value !== null && value.trim() !== "") keys.add(prefix);
   }
