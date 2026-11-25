@@ -1,5 +1,4 @@
 import { normalizePresentation } from "../presentation";
-import { stripLeakedThinking } from "../openai-compat";
 import type {
   AlphaGateCandidate,
   AlphaGateDiagnostics,
