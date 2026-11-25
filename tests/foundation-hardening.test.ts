@@ -425,7 +425,7 @@ describe("Foundation Hardening - Workstreams Verification", () => {
   });
 
   describe("Workstream 8: Persistence Truthfulness (Persist Before Commit)", () => {
-    it("fails cleanly and does not mutate in-memory notes if storage write throws", () => {
+    it("fails cleanly and does not mutate in-memory notes if storage write throws", async () => {
       const initialNotesCount = alphaStore.get().notes.length;
 
       // Make storage throw on setItem
@@ -433,37 +433,33 @@ describe("Foundation Hardening - Workstreams Verification", () => {
         throw new Error("Disk full / Quota exceeded");
       });
 
-      expect(() => {
-        alphaStore.upsertNote({
-          id: "note-fail-test",
-          title: "Important note",
-          body: "Should not be persisted or retained in memory",
-          updatedAt: Date.now(),
-        });
-      }).toThrow(PersistenceError);
+      await expect(alphaStore.upsertNote({
+        id: "note-fail-test",
+        title: "Important note",
+        body: "Should not be persisted or retained in memory",
+        updatedAt: Date.now(),
+      })).rejects.toThrow(PersistenceError);
 
       // Verify in-memory state was NOT mutated
       expect(alphaStore.get().notes.length).toBe(initialNotesCount);
       expect(alphaStore.get().notes.some((n) => n.id === "note-fail-test")).toBe(false);
     });
 
-    it("fails cleanly and does not mutate in-memory bills if storage write throws", () => {
+    it("fails cleanly and does not mutate in-memory bills if storage write throws", async () => {
       const initialBillsCount = alphaStore.get().bills.length;
 
       (globalThis as any).window.localStorage.setItem = vi.fn(() => {
         throw new Error("Quota exceeded");
       });
 
-      expect(() => {
-        alphaStore.upsertBill({
-          id: "bill-fail-test",
-          name: "Water Bill",
-          amount: 50,
-          dueDate: "2026-10-01",
-          balance: 50,
-          status: "due",
-        });
-      }).toThrow(PersistenceError);
+      await expect(alphaStore.upsertBill({
+        id: "bill-fail-test",
+        name: "Water Bill",
+        amount: 50,
+        dueDate: "2026-10-01",
+        balance: 50,
+        status: "due",
+      })).rejects.toThrow(PersistenceError);
 
       expect(alphaStore.get().bills.length).toBe(initialBillsCount);
       expect(alphaStore.get().bills.some((b) => b.id === "bill-fail-test")).toBe(false);
