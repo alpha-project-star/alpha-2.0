@@ -154,7 +154,7 @@ export class LocalDeliveryRepository implements DeliveryRepository {
   private inMemoryFallback = new Map<string, DeliveryRecord>();
 
   private getStorageKey(userId: string): string {
-    return `${STORAGE_PREFIX}.${userId}`;
+    return getKey(STORAGE_PREFIX, userId);
   }
 
   async getDelivery(userId: string, deliveryId: string): Promise<DeliveryRecord | null> {
@@ -249,17 +249,11 @@ export class LocalDeliveryRepository implements DeliveryRepository {
     }
   }
 
-  clear(): void {
-    this.inMemoryFallback.clear();
-    const storage = getStorage();
-    if (storage) {
-      const keysToRemove: string[] = [];
-      for (let i = 0; i < storage.length; i++) {
-        const k = storage.key(i);
-        if (k && k.startsWith(STORAGE_PREFIX)) keysToRemove.push(k);
-      }
-      keysToRemove.forEach((k) => storage.removeItem(k));
+  clear(userId: string = getCurrentStoreUser()): void {
+    for (const key of this.inMemoryFallback.keys()) {
+      if (key.startsWith(`${userId}:`)) this.inMemoryFallback.delete(key);
     }
+    getStorage()?.removeItem(this.getStorageKey(userId));
   }
 }
 
