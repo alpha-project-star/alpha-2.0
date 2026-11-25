@@ -1,6 +1,5 @@
 import { toast } from "sonner";
 import { z } from "zod";
-import { auth } from "./firebase";
 import {
   K,
   getKey,
@@ -321,7 +320,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
         }
         stagedReminders.push({
           id: lr.id || uid(),
-          userId: "local-user",
+          userId: currentUid,
           title: lr.title.trim(),
           notes: lr.notes || "",
           dueAt,
@@ -421,7 +420,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
         const keysToRemove: string[] = [];
         for (let i = 0; i < window.localStorage.length; i++) {
           const key = window.localStorage.key(i);
-          if (key && (isAlphaKeyPrefix(key) || isKeyForUid(key, "local-user"))) {
+          if (key && isKeyForUid(key, currentUid)) {
             keysToRemove.push(key);
           }
         }
@@ -465,7 +464,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
           const keysToRemove: string[] = [];
           for (let i = 0; i < window.localStorage.length; i++) {
             const key = window.localStorage.key(i);
-            if (key && (isAlphaKeyPrefix(key) || isKeyForUid(key, "local-user"))) {
+            if (key && isKeyForUid(key, currentUid)) {
               keysToRemove.push(key);
             }
           }
@@ -524,7 +523,7 @@ export async function wipeAlphaData() {
       const keysToRemove: string[] = [];
       for (let i = 0; i < window.localStorage.length; i++) {
         const key = window.localStorage.key(i);
-        if (key && (isAlphaKeyPrefix(key) || isKeyForUid(key, "local-user"))) {
+        if (key && isKeyForUid(key, currentUid)) {
           keysToRemove.push(key);
         }
       }
