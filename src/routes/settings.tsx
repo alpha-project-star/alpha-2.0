@@ -212,8 +212,15 @@ function SettingsRoute() {
       )
     )
       return;
-    setDataStatus("Wiping…");
-    await wipeAlphaData();
+    setDataStatus("Wiping account data…");
+    try {
+      await wipeAlphaData();
+      setDataStatus("Account data deleted.");
+    } catch (error: any) {
+      const message = error?.message || "unknown error";
+      setDataStatus(`Account wipe failed or was incomplete: ${message}`);
+      toast.error(message);
+    }
   }
 
   useEffect(() => {
