@@ -84,12 +84,12 @@ describe("Phase 16 - AL-01 LocalStorage Persistence Truthfulness Regression Test
     expect(result.status).toBe("unavailable");
   });
 
-  it("5. When clearChat summary removal fails, alphaStore.clearChat throws PersistenceError", () => {
+  it("5. When clearChat summary removal fails, alphaStore.clearChat rejects with PersistenceError", async () => {
     const mockLocalStorage = {
       getItem: vi.fn(),
       setItem: vi.fn(),
       removeItem: vi.fn((key: string) => {
-        if (key === "alpha.summary.v1") {
+        if (key.endsWith("alpha.summary.v1.unauthenticated")) {
           throw new Error("Storage failure during summary deletion");
         }
       }),
@@ -99,8 +99,6 @@ describe("Phase 16 - AL-01 LocalStorage Persistence Truthfulness Regression Test
       localStorage: mockLocalStorage,
     };
 
-    expect(() => {
-      alphaStore.clearChat();
-    }).toThrow(PersistenceError);
+    await expect(alphaStore.clearChat()).rejects.toThrow(PersistenceError);
   });
 });
