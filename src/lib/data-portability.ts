@@ -4,8 +4,8 @@ import { auth } from "./firebase";
 import {
   K,
   getKey,
+  getCurrentStoreUser,
   isKeyForUid,
-  isAlphaKeyPrefix,
   ChatMessageSchema,
   NoteSchema,
   BillSchema,
@@ -155,7 +155,7 @@ export async function exportAlphaData(): Promise<AlphaDataExport> {
   }
 
   const reminderRepo = reminderRepository;
-  const currentUid = auth.currentUser?.uid || "local-user";
+  const currentUid = getCurrentStoreUser();
   let exportedReminders: FirestoreReminder[] = [];
   try {
     exportedReminders = await reminderRepo.listReminders(currentUid);
@@ -179,6 +179,8 @@ export function downloadAlphaData(data: AlphaDataExport) {
 }
 
 export async function importAlphaData(fileOrJson: File | string): Promise<{ restored: string[] }> {
+  const currentUid = getCurrentStoreUser();
+  if (currentUid === "unauthenticated") throw new Error("Sign in before importing an Alpha backup.");
   const text = typeof fileOrJson === "string" ? fileOrJson : await fileOrJson.text();
   const data: AlphaDataExport = JSON.parse(text);
   if (!data || (data.version !== 1 && data.version !== 2)) {
@@ -278,7 +280,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
 
       stagedReminders.push({
         id: r.id,
-        userId: "local-user",
+        userId: currentUid,
         title: r.title,
         notes: r.notes,
         dueAt: r.dueAt,
@@ -373,7 +375,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
   if (typeof window !== "undefined" && window.localStorage) {
     for (let i = 0; i < window.localStorage.length; i++) {
       const key = window.localStorage.key(i);
-      if (key && (isAlphaKeyPrefix(key) || isKeyForUid(key, "local-user"))) {
+      if (key && isKeyForUid(key, currentUid)) {
         const val = window.localStorage.getItem(key);
         if (val !== null) previousLocalStorage[key] = val;
       }
@@ -383,7 +385,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
   const reminderRepo = reminderRepository;
   let previousReminders: FirestoreReminder[];
   try {
-    previousReminders = await reminderRepo.listReminders("local-user");
+    previousReminders = await reminderRepo.listReminders(currentUid);
   } catch (snapshotErr) {
     throw new Error(
       `Import aborted: failed to snapshot existing reminders (${snapshotErr instanceof Error ? snapshotErr.message : String(snapshotErr)}). Existing data was not modified.`
@@ -433,7 +435,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
       }
 
       // 3. Replace reminders in canonical LocalReminderRepository
-      await reminderRepo.replaceReminders("local-user", stagedReminders);
+      await reminderRepo.replaceReminders(currentUid, stagedReminders);
 
       // 4. Replace music tracks in IndexedDB (including empty music collection replacement)
       if (shouldReplaceMusic) {
@@ -474,7 +476,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
             window.localStorage.setItem(key, val);
           }
         }
-        await reminderRepo.replaceReminders("local-user", previousReminders);
+        await reminderRepo.replaceReminders(currentUid, previousReminders);
         if (shouldReplaceMusic) {
           const db = await openDb();
           await new Promise<void>((resolve) => {
@@ -512,7 +514,9 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
 }
 
 export async function wipeAlphaData() {
-  return await withCrossContextLock("alpha_global_wipe_lock", async () => {
+  const currentUid = getCurrentStoreUser();
+  if (currentUid === "unauthenticated") throw new Error("Sign in before wiping account data.");
+  return await withCrossContextLock(`alpha_account_wipe_lock.${currentUid}`, async () => {
     const errors: string[] = [];
 
     // 1. Clear localStorage keys
@@ -534,7 +538,7 @@ export async function wipeAlphaData() {
     // 2. Clear canonical reminders
     try {
       const reminderRepo = reminderRepository;
-      await reminderRepo.replaceReminders("local-user", []);
+      await reminderRepo.replaceReminders(currentUid, []);
     } catch (err: unknown) {
       errors.push(`Failed to clear canonical reminders: ${err instanceof Error ? err.message : String(err)}`);
     }
