@@ -42,7 +42,9 @@ class ReminderContextManager {
   private currentUserId: string = "unauthenticated";
 
   constructor() {
-    this.reload(this.currentUserId);
+    // Defer localStorage hydration until the first explicit user-scoped access.
+    // alpha-store imports this manager, so eager hydration creates a circular
+    // initialization read before alpha-store's key namespace is initialized.
   }
 
   private getStorageKey(userId: string): string {
