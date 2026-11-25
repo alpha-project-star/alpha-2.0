@@ -48,11 +48,18 @@ describe("UID-scoped local persistence", () => {
 
   it("keeps unscoped legacy data intact until the current user explicitly imports it", () => {
     values.set("alpha.notes.v1", JSON.stringify([{ id: "legacy-note" }]));
+    values.set("alpha.chat_session.session-1.v1", JSON.stringify([{ id: "legacy-message" }]));
+    values.set("alpha.cloudSync.v1", JSON.stringify({ memories: ["old-account-id"] }));
     expect(getLegacyStorageKeys()).toContain("alpha.notes.v1");
+    expect(getLegacyStorageKeys()).toContain("alpha.chat_session.session-1.v1");
+    expect(getLegacyStorageKeys()).not.toContain("alpha.cloudSync.v1");
 
     const result = importLegacyStorageForCurrentUser();
     expect(result.imported).toContain("alpha.notes.v1");
+    expect(result.imported).toContain("alpha.chat_session.session-1.v1");
     expect(values.get("alpha.notes.v1")).toContain("legacy-note");
+    expect(values.get("alpha.chat_session.session-1.v1.account-A")).toContain("legacy-message");
+    expect(values.get("alpha.cloudSync.v1.account-A")).toBeNull();
     expect(values.get("alpha.notes.v1.account-A")).toContain("legacy-note");
 
     setStoreUser("account-B");
