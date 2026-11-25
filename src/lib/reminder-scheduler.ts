@@ -215,6 +215,18 @@ export class ReminderScheduler {
       const reminders = await this.repo.listReminders(activeUser);
       const dueReminders = await this.evaluateDueReminders(reminders, now, activeUser);
 
+      // A delivered reminder must wait until its scheduled repeat time. The
+      // base due-date check remains true forever after dueAt, so without this
+      // gate the five-second poll loop would redeliver it continuously.
+      for (let i = dueReminders.length - 1; i >= 0; i--) {
+        const reminder = dueReminders[i];
+        if (reminder.nextRepeatAt && now < reminder.nextRepeatAt) {
+          const eventId = generateReminderEventId(reminder.id, reminder.dueAt);
+          const ackStatus = await notificationAcknowledgementManager.getAcknowledgementStatus(activeUser, eventId);
+          if (ackStatus === 'delivered') dueReminders.splice(i, 1);
+        }
+      }
+
       // Handle Repetition
       for (const reminder of reminders) {
         if (
@@ -223,8 +235,8 @@ export class ReminderScheduler {
           now >= reminder.nextRepeatAt
         ) {
           const ackStatus = await notificationAcknowledgementManager.getAcknowledgementStatus(activeUser, generateReminderEventId(reminder.id, reminder.dueAt));
-          if (ackStatus !== 'acknowledged') {
-            // Schedule repetition
+          if (ackStatus !== 'acknowledged' && !dueReminders.some((due) => due.id === reminder.id)) {
+            // Schedule repetition once the repeat deadline has elapsed.
             dueReminders.push(reminder);
           } else {
              // Already acknowledged, clear repeat fields
