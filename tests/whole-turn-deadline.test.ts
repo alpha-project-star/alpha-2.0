@@ -666,9 +666,12 @@ describe("Alpha Pass C3-R2 — Complete Whole-Turn Deadline Invariants", { timeo
 
     // Timeout is shorter than createReminder latency
     const promise = sendChat([{ id: "m1", role: "user", text: "create reminder", ts: Date.now() }], { timeoutMs: 100 });
+    // Attach the rejection observer before advancing fake timers so Vitest
+    // cannot report the expected deadline rejection as temporarily unhandled.
+    const rejected = expect(promise).rejects.toThrow(WholeTurnTimeoutError);
     
     await vi.advanceTimersByTimeAsync(250);
-    await expect(promise).rejects.toThrow(WholeTurnTimeoutError);
+    await rejected;
 
     // Verify tool was only called once
     expect(createCallCount).toBe(1);
