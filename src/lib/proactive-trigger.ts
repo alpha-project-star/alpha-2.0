@@ -104,7 +104,7 @@ export class ProactiveTrigger {
     authenticatedUserId?: string,
   ): Promise<ProactiveTriggerResult> {
     const isExplicitAuthProvided = arguments.length >= 2;
-    return this.enqueue(async () => {
+    return this.enqueue<ProactiveTriggerResult>(async () => {
       const effectiveUserId = isExplicitAuthProvided
         ? authenticatedUserId
         : extractEventField(rawEvent, 'userId');
