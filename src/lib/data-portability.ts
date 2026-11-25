@@ -42,7 +42,10 @@ const STORE_SCHEMAS: Record<string, z.ZodType<any>> = {
   // summary is unstructured string, no strict schema beyond string
 };
 
-const DB_NAME = "alpha.music.v1";
+function getDatabaseName(): string {
+  return `alpha.music.v1.${getCurrentStoreUser()}`;
+}
+const LEGACY_DB_NAME = "alpha.music.v1";
 const STORE = "tracks";
 
 export interface AlphaDataExport {
@@ -60,13 +63,13 @@ export interface AlphaDataExport {
   }>;
 }
 
-function openDb(): Promise<IDBDatabase> {
+function openDb(databaseName = getDatabaseName()): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
       reject(new Error("IndexedDB is not available in this browser."));
       return;
     }
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(databaseName, 1);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: "id" });
