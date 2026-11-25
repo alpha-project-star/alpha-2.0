@@ -22,8 +22,47 @@ export async function syncDocToCloud(
 
   const path = `users/${user.uid}/${collectionName}/${id}`;
   try {
+    // Keep the app's local model intact while also satisfying the canonical
+    // Firestore rules schema. The extra local fields are retained for round trips.
+    const source = data && typeof data === "object" ? data : {};
+    const createdAt =
+      typeof source.createdAt === "number" ? source.createdAt :
+      typeof source.updatedAt === "number" ? source.updatedAt : Date.now();
+    const payload: Record<string, unknown> = {
+      ...source,
+      id,
+      userId: user.uid,
+      createdAt,
+    };
+
+    if (collectionName === "memories") {
+      const content = typeof source.content === "string"
+        ? source.content
+        : [source.topic, source.detail].filter((part) => typeof part === "string" && part.length > 0).join("\\n");
+      if (!content || content.length > 10000) throw new Error("Memory content is empty or exceeds the 10,000 character cloud limit.");
+      payload.content = content;
+    } else if (collectionName === "notes") {
+      const content = typeof source.content === "string"
+        ? source.content
+        : [source.title, source.body].filter((part) => typeof part === "string" && part.length > 0).join("\\n\\n");
+      if (!content || content.length > 20000) throw new Error("Note content is empty or exceeds the 20,000 character cloud limit.");
+      payload.content = content;
+    } else if (collectionName === "tasks" || collectionName === "goals") {
+      if (typeof source.title !== "string" || !source.title.trim() || source.title.length > 1000) {
+        throw new Error("Task/goal title is missing or exceeds the 1,000 character cloud limit.");
+      }
+    } else if (collectionName === "bills") {
+      const description = typeof source.description === "string" ? source.description : source.name;
+      const amount = Number(source.amount ?? 0);
+      if (typeof description !== "string" || !description.trim() || description.length > 1000 || !Number.isFinite(amount)) {
+        throw new Error("Bill description or amount is invalid for cloud storage.");
+      }
+      payload.description = description;
+      payload.amount = amount;
+    }
+
     const docRef = doc(db, "users", user.uid, collectionName, id);
-    await setDoc(docRef, { ...data, userId: user.uid }, { merge: true });
+    await setDoc(docRef, payload, { merge: true });
   } catch (err: any) {
     console.warn(`[CloudSync] Background sync to ${path} failed (offline or unauthenticated):`, err?.message || err);
   }
