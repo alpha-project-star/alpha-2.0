@@ -32,10 +32,29 @@ export async function sendWebPushToSubscription(
   subscription: {
     endpoint: string;
     keys: { p256dh: string; auth: string };
-    userId?: string;
+    userId: string;
   },
   payload: PushPayload
 ): Promise<PushSendResult> {
+  if (!payload.userId || subscription.userId !== payload.userId) {
+    return {
+      success: false,
+      endpoint: subscription.endpoint,
+      status: 'failed',
+      error: 'Push delivery refused: subscription owner does not match the reminder owner',
+    };
+  }
+  if (!subscription.endpoint.startsWith('https://') ||
+      !subscription.keys?.p256dh || !subscription.keys?.auth ||
+      !payload.eventId || !payload.reminderId) {
+    return {
+      success: false,
+      endpoint: subscription.endpoint,
+      status: 'failed',
+      error: 'Push delivery refused: subscription or event data is invalid',
+    };
+  }
+
   const publicKey = process.env.VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
   const subject = process.env.VAPID_SUBJECT || 'mailto:admin@alpha.app';
@@ -64,10 +83,9 @@ export async function sendWebPushToSubscription(
       type: payload.type || 'alpha_notification',
       eventId: payload.eventId,
       reminderId: payload.reminderId,
-      title: payload.title,
-      body: payload.body,
+      title: String(payload.title || 'Alpha Reminder').slice(0, 120),
+      body: String(payload.body || '').slice(0, 1000),
       url: payload.url || '/',
-      notes: payload.notes,
       metadata: payload.metadata,
     });
 
