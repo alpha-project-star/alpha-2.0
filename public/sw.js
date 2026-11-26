@@ -16,10 +16,15 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('push', (event) => {
   try {
-    const data = event.data ? event.data.json() : {};
-    const title = data.title || '🔔 Alpha Reminder';
+    let data = {};
+    try {
+      data = event.data ? event.data.json() : {};
+    } catch {
+      data = { body: 'You have a new reminder due.' };
+    }
+    const title = typeof data.title === 'string' ? data.title.slice(0, 120) : '🔔 Alpha Reminder';
     const options = {
-      body: data.body || '',
+      body: typeof data.body === 'string' ? data.body.slice(0, 1000) : '',
       tag: data.eventId || 'alpha-notification',
       icon: data.icon || '/icon-192.png',
       data: {
@@ -45,12 +50,22 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const urlToOpen = (event.notification.data && event.notification.data.url) || '/';
+  const requestedUrl = event.notification.data && event.notification.data.url;
+  let urlToOpen = '/';
+  try {
+    const parsedUrl = new URL(typeof requestedUrl === 'string' ? requestedUrl : '/', self.location.origin);
+    if (parsedUrl.origin === self.location.origin) {
+      urlToOpen = parsedUrl.pathname + parsedUrl.search + parsedUrl.hash;
+    }
+  } catch {
+    urlToOpen = '/';
+  }
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
-        if (client.url && 'focus' in client) {
+        if (client.url && new URL(client.url).origin === self.location.origin && 'focus' in client) {
+          await client.navigate(urlToOpen);
           return client.focus();
         }
       }
