@@ -8,7 +8,7 @@ import { activity } from "@/lib/activity";
 
 export default function MultimodalStudio() {
   const [prompt, setPrompt] = useState("");
-  const [result, setResult] = useState<string | null>(null);
+  const [result, setResult] = useState<{ url: string; type: "image" | "video" } | null>(null);
 
   const handleGenerate = async (type: "image" | "video") => {
     setResult(null);
@@ -19,7 +19,7 @@ export default function MultimodalStudio() {
       const res = type === "image" 
         ? await generateImage({ data: { prompt } })
         : await generateVideo({ data: { prompt } });
-      setResult(res.dataUrl);
+      setResult({ url: res.dataUrl, type });
     } catch (e) {
       failed = true;
       session.error(e instanceof Error ? e.message : "Generation failed");
@@ -66,7 +66,11 @@ export default function MultimodalStudio() {
         </Tabs>
         {result && (
           <div className="mt-4">
-            <img src={result} alt="Generated result" className="max-w-full h-auto" />
+            {result.type === "video" ? (
+              <video src={result.url} controls playsInline className="max-w-full h-auto" />
+            ) : (
+              <img src={result.url} alt="Generated result" className="max-w-full h-auto" />
+            )}
           </div>
         )}
       </CardContent>
