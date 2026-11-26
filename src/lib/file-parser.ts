@@ -22,15 +22,15 @@ const PDF_PAGE_LIMIT_NOTICE = "[... PDF extraction limited to the first 50 pages
 export async function parseUploadedFile(file: File): Promise<ParsedDocument> {
   activity.set("reading_file");
   const startTime = Date.now();
-  if (!Number.isFinite(file.size) || file.size < 0 || file.size > MAX_UPLOAD_BYTES) {
-    throw new RangeError(`File exceeds Alpha's 20 MB upload limit.`);
-  }
   const fileName = file.name || "document";
   const ext = fileName.includes(".")
     ? fileName.slice(fileName.lastIndexOf(".")).toLowerCase()
     : "";
 
   try {
+    if (!Number.isFinite(file.size) || file.size < 0 || file.size > MAX_UPLOAD_BYTES) {
+      throw new RangeError(`File exceeds Alpha's 20 MB upload limit.`);
+    }
     let extractedText = "";
 
     if (ext === ".pdf") {
