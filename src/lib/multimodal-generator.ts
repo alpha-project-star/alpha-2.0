@@ -98,7 +98,7 @@ export async function generateImageServer(
   };
 }
 
-export async function generateVideoServer(prompt: string): Promise<{ dataUrl: string }> {
+export async function generateVideoServer(prompt: string): Promise<{ dataUrl: string; mediaType: "video" }> {
   const clean = prompt.trim() || "snow falling in a city";
 
   // 1. Search Wikimedia Commons for real, 100% free public domain video clips (zero API keys required)
@@ -129,7 +129,7 @@ export async function generateVideoServer(prompt: string): Promise<{ dataUrl: st
             info.url.endsWith(".mp4") ||
             info.mime?.startsWith("video/"))
         ) {
-          return { dataUrl: info.url };
+          return { dataUrl: info.url, mediaType: "video" };
         }
       }
     }
@@ -137,10 +137,8 @@ export async function generateVideoServer(prompt: string): Promise<{ dataUrl: st
     console.warn("[generateVideoServer] Wikimedia Commons lookup error:", err);
   }
 
-  // 2. If no direct video clip was found, generate a high-resolution cinematic FLUX animation scene (100% free, no key)
-  const encodedPrompt = encodeURIComponent(
-    `${clean}, cinematic 4k motion frame, detailed animation scene, masterpiece, 8k`,
+  // Do not return a still image from an image-generation service as if it were a video.
+  throw new Error(
+    "No matching public video clip was found. Alpha can currently search for existing video clips, but it cannot generate new videos.",
   );
-  const fallbackUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=576&model=flux&nologo=true`;
-  return { dataUrl: fallbackUrl };
 }
