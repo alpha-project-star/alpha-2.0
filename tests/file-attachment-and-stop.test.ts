@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseUploadedFile, formatUserBubbleContent, extractRtfText, cleanWordDocText } from "../src/lib/file-parser";
+import { parseUploadedFile, formatUserBubbleContent, extractRtfText, cleanWordDocText, MAX_UPLOAD_BYTES } from "../src/lib/file-parser";
 import { activity } from "../src/lib/activity";
 import { stopAlphaGeneration } from "../src/lib/alpha.functions";
 import type { ChatMessage } from "../src/lib/alpha-store";
@@ -14,6 +14,12 @@ describe("File Attachment & Process Stop Audit", () => {
     expect(parsed.text).toBe("Alpha system briefing content");
     expect(parsed.size).toBe(file.size);
     expect(parsed.truncated).toBe(false);
+  });
+
+  it("rejects files above the byte limit and resets parser activity", async () => {
+    const oversized = new File([new Uint8Array(MAX_UPLOAD_BYTES + 1)], "oversized.pdf", { type: "application/pdf" });
+    await expect(parseUploadedFile(oversized)).rejects.toThrow(/20 MB upload limit/);
+    expect(activity.get().kind).toBe("idle");
   });
 
   it("verifies reading_file activity label is exactly 'Reading file..'", () => {
