@@ -281,8 +281,15 @@ async function patchFirestoreDocument(
     body: JSON.stringify({ fields: encodeFirestoreFields(fields) }),
   });
   if (!response.ok) {
-    const error = new Error("Firestore conditional write failed with status " + response.status);
-    (error as Error & { status?: number }).status = response.status;
+    const errorBody = await response.json().catch(() => ({})) as {
+      error?: { status?: string; message?: string };
+    };
+    const error = new Error(
+      "Firestore conditional write failed with status " + response.status +
+      (errorBody.error?.status ? " (" + errorBody.error.status + ")" : ""),
+    ) as Error & { status?: number; statusName?: string };
+    error.status = response.status;
+    error.statusName = errorBody.error?.status;
     throw error;
   }
   return await response.json() as FirestoreDocument;
@@ -366,8 +373,13 @@ async function claimPushDelivery(
     if (!claimed.updateTime) throw new Error("Firestore did not return a push-delivery claim version");
     return { path, updateTime: claimed.updateTime };
   } catch (error) {
-    const status = (error as Error & { status?: number }).status;
-    if (status === 409 || status === 412) return null;
+    const conflict = error as Error & { status?: number; statusName?: string };
+    if (
+      conflict.status === 409 ||
+      conflict.status === 412 ||
+      conflict.statusName === "FAILED_PRECONDITION" ||
+      conflict.statusName === "ALREADY_EXISTS"
+    ) return null;
     throw error;
   }
 }
