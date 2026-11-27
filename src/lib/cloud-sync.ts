@@ -172,6 +172,7 @@ export async function wipeAccountCloudData(uid: string): Promise<void> {
     "notificationDiagnostics",
     "pushSubscriptions",
     "notificationDeliveries",
+    "pushDeliveries",
   ];
 
   for (const collectionName of collectionsToClear) {
