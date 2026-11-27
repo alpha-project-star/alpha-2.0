@@ -210,7 +210,9 @@ export function initReminderCloudSync(repository: ReminderRepository): () => voi
           // Only IDs confirmed by a server-backed snapshot are considered
           // previously remote. syncReminderToCloud records newly uploaded IDs
           // after successful writes, so failed offline uploads stay recoverable.
-          const nextKnown = new Set(cloudItems.map((item) => item.id));
+          const nextKnown = new Set(
+            cloudItems.filter((item) => !deletedAtSnapshot.has(item.id)).map((item) => item.id),
+          );
           writeKnownIds(uid, nextKnown);
         })().catch((error) => {
           console.error("[ReminderCloudSync] Snapshot reconciliation failed:", error);
