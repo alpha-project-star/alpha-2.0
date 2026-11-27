@@ -241,9 +241,31 @@ export function initCloudSync(): () => void {
               void syncDocToCloud(entry.name, localItem.id, localItem);
             }
 
-            // Server values win for matching IDs and server deletions are reflected
-            // locally through the known-ID reconciliation above.
-            for (const cloudItem of cloudItems) mergedById.set(cloudItem.id, cloudItem);
+            // Resolve concurrent edits with deterministic last-write-wins.
+            // Both local mutation paths and cloud documents carry updatedAt; use
+            // createdAt only as a legacy fallback. Equal/missing timestamps keep
+            // the server copy, so replicas converge deterministically.
+            const syncTimestamp = (item: Record<string, unknown>): number => {
+              if (typeof item.updatedAt === "number" && Number.isFinite(item.updatedAt)) {
+                return item.updatedAt;
+              }
+              if (typeof item.createdAt === "number" && Number.isFinite(item.createdAt)) {
+                return item.createdAt;
+              }
+              return 0;
+            };
+
+            for (const cloudItem of cloudItems) {
+              const localItem = localItems.find((item) => item.id === cloudItem.id);
+              if (localItem && syncTimestamp(localItem) > syncTimestamp(cloudItem)) {
+                mergedById.set(localItem.id, localItem);
+                // Reconcile the newer local winner back to Firestore. The
+                // subsequent snapshot will converge because timestamps match.
+                void syncDocToCloud(entry.name, localItem.id, localItem);
+              } else {
+                mergedById.set(cloudItem.id, cloudItem);
+              }
+            }
 
             const merged = Array.from(mergedById.values());
             const nextMetadata: SyncMetadata = {
