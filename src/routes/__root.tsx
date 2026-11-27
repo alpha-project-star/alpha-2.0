@@ -20,6 +20,10 @@ import { backgroundRuntime } from "../lib/background-runtime";
 import { AuthProvider, useAuth } from "../lib/auth";
 import { LocalReminderRepository, reminderRepository } from "../lib/reminder-repo";
 import { initCloudSync } from "../lib/cloud-sync";
+import { initReminderCloudSync } from "../lib/reminder-cloud-sync";
+import { initNotificationCloudSync } from "../lib/notification-cloud-sync";
+import { notificationAcknowledgementManager } from "../lib/notification-acknowledgement";
+import { notificationDelivery } from "../lib/notification-delivery";
 
 function NotFoundComponent() {
   return (
@@ -43,12 +47,13 @@ function NotFoundComponent() {
   );
 }
 
-function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
-  console.error(error);
+function ErrorComponent({ error }: { error: unknown }) {
+  const safeError = error instanceof Error ? error : new Error(String(error));
+  console.error(safeError);
   const router = useRouter();
   useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
+    reportLovableError(safeError, { boundary: "tanstack_root_error_component" });
+  }, [safeError]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -63,7 +68,6 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
           <button
             onClick={() => {
               router.invalidate();
-              reset();
             }}
             className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
@@ -139,7 +143,18 @@ function AppContent() {
   const user = auth.status === 'authenticated' ? auth.user : null;
 
   useEffect(() => {
-    return initCloudSync();
+    const stopCloudSync = initCloudSync();
+    const stopReminderSync = initReminderCloudSync(reminderRepository);
+    const deliveryRepository = notificationDelivery.getRepository();
+    const stopNotificationSync = initNotificationCloudSync(
+      notificationAcknowledgementManager.getRepository(),
+      deliveryRepository,
+    );
+    return () => {
+      stopNotificationSync();
+      stopReminderSync();
+      stopCloudSync();
+    };
   }, []);
 
   useEffect(() => {

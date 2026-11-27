@@ -8,32 +8,33 @@ import { activity } from "@/lib/activity";
 
 export default function MultimodalStudio() {
   const [prompt, setPrompt] = useState("");
-  const [result, setResult] = useState<string | null>(null);
+  const [result, setResult] = useState<{ url: string; type: "image" | "video" } | null>(null);
 
   const handleGenerate = async (type: "image" | "video") => {
     setResult(null);
-    activity.kind = type === "image" ? "generating_image" : "generating_video";
+    const session = activity.start(type === "image" ? "generating_image" : "generating_video");
+    let failed = false;
     
     try {
       const res = type === "image" 
-        ? await generateImage({ prompt })
-        : await generateVideo({ prompt });
-      setResult(res.dataUrl);
+        ? await generateImage({ data: { prompt } })
+        : await generateVideo({ data: { prompt } });
+      setResult({ url: res.dataUrl, type });
     } catch (e) {
-      activity.kind = "action_failed";
+      failed = true;
+      session.error(e instanceof Error ? e.message : "Generation failed");
       console.error(e);
     } finally {
-      if (activity.kind !== "action_failed") {
-        activity.kind = "idle";
-      }
+      if (!failed) session.clear();
     }
   };
 
   const handleTTS = () => {
-    activity.kind = "generating_tts";
+    const session = activity.start("generating_tts");
     const utterance = new SpeechSynthesisUtterance(prompt);
+    utterance.onend = () => session.clear();
+    utterance.onerror = () => session.error("Speech playback failed");
     window.speechSynthesis.speak(utterance);
-    activity.kind = "idle";
   };
 
   return (
@@ -65,7 +66,11 @@ export default function MultimodalStudio() {
         </Tabs>
         {result && (
           <div className="mt-4">
-            <img src={result} alt="Generated result" className="max-w-full h-auto" />
+            {result.type === "video" ? (
+              <video src={result.url} controls playsInline className="max-w-full h-auto" />
+            ) : (
+              <img src={result.url} alt="Generated result" className="max-w-full h-auto" />
+            )}
           </div>
         )}
       </CardContent>

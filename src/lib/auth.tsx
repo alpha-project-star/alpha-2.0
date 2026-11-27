@@ -4,6 +4,7 @@ import {
   onAuthStateChanged,
   signInAnonymously,
   signInWithPopup,
+  linkWithPopup,
   GoogleAuthProvider,
   signOut,
   User,
@@ -28,6 +29,24 @@ let bootstrapAttempted = false;
  */
 export async function signInWithGoogle(): Promise<User | null> {
   const provider = new GoogleAuthProvider();
+  const currentUser = auth.currentUser;
+
+  // Link Google to the anonymous identity first so its UID-scoped local data
+  // and Firestore ownership remain attached to the same account.
+  if (currentUser?.isAnonymous) {
+    try {
+      const linked = await linkWithPopup(currentUser, provider);
+      return linked.user;
+    } catch (error: any) {
+      if (error?.code === "auth/credential-already-in-use" || error?.code === "auth/email-already-in-use") {
+        throw new Error(
+          "That Google account already belongs to another Alpha identity. Your current local data has been kept separate; export it before signing into the existing account."
+        );
+      }
+      throw error;
+    }
+  }
+
   const res = await signInWithPopup(auth, provider);
   return res.user;
 }

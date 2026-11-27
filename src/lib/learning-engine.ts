@@ -424,7 +424,7 @@ export class LearningEngine {
     if (!parsed.success) {
       return {
         status: "REJECTED",
-        reason: `Schema validation error: ${parsed.error.errors.map((e) => e.message).join(", ")}`,
+        reason: `Schema validation error: ${parsed.error.issues.map((e) => e.message).join(", ")}`,
       };
     }
 
@@ -1242,7 +1242,7 @@ export class LearningEngine {
       const parsed = LearningRecordSchema.safeParse(item);
       if (!parsed.success) {
         rejectedCount++;
-        errors.push(`Invalid schema: ${parsed.error.errors.map((e) => e.message).join(", ")}`);
+        errors.push(`Invalid schema: ${parsed.error.issues.map((e) => e.message).join(", ")}`);
         continue;
       }
 

@@ -678,7 +678,7 @@ export async function executeActionTagsAsync(
         status: "failed",
         message: `Could not delete ${kind}.`,
         failedKeys,
-        structuredResult: { count: 0, targetIds: intendedIds, successfulIds: [], failedIds: intendedIds },
+        structuredResult: { count: 0, targetIds, successfulIds: [], failedIds },
       };
     } else if (successfulIds.length === intendedIds.length) {
       if (hits.length > 1) {
@@ -789,7 +789,7 @@ export async function executeActionTagsAsync(
         status: "failed",
         message: `Could not clear ${plural}.`,
         failedKeys,
-        structuredResult: { count: 0, targetIds: intendedIds, successfulIds: [], failedIds: intendedIds },
+        structuredResult: { count: 0, targetIds, successfulIds: [], failedIds },
       });
     } else if (successfulIds.length === intendedIds.length) {
       executedMutations.add(bulkKey);
@@ -1055,7 +1055,7 @@ export async function executeActionTagsAsync(
         results.push({
           tag: "ADD_REMINDER",
           status: "success",
-          message: `Reminder saved: "${reminder.title}" — ${formatWhen(reminder.dueAt)}`,
+          message: `Reminder saved: "${reminder.title}" — ${new Date(reminder.dueAt).toLocaleString()}`,
           logicalKeys: [keyWithParsedDue, keyWithRawDue],
         });
       } else {
@@ -1292,13 +1292,13 @@ export async function executeActionTagsAsync(
 
     if (successfulIds.length === 0) {
       activity.set("action_failed");
-      const failedKeys = intendedIds.map((id) => getCanonicalReminderDeleteKey({ targetIds: [id] }));
+      const failedKeys = failedIds.map((id) => getCanonicalReminderDeleteKey({ targetIds: [id] }));
       results.push({
         tag: "DELETE_REMINDER",
         status: "failed",
         message: `Could not delete reminders.`,
         failedKeys,
-        structuredResult: { count: 0, targetIds: intendedIds, successfulIds: [], failedIds: intendedIds },
+        structuredResult: { count: 0, targetIds, successfulIds: [], failedIds },
       });
     } else if (successfulIds.length === targetIds.length) {
       if (hits.length > 1) {

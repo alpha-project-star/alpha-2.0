@@ -38,6 +38,8 @@ const VALID_REMINDER_TRANSITIONS: Record<ReminderState, ReminderState[]> = {
   active: ['completed', 'cancelled', 'active'],
   completed: ['active'], // Reopening
   cancelled: ['active'], // Reopening
+  passed: ['acknowledged'],
+  acknowledged: [], // Terminal once the user acknowledges the reminder
 };
 
 const VALID_EVENT_DELIVERY_TRANSITIONS: Record<NotificationState, NotificationState[]> = {

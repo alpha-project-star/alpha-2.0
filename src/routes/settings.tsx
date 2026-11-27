@@ -20,7 +20,7 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
-import { alphaStore, useAlpha, type Settings } from "../lib/alpha-store";
+import { alphaStore, useAlpha, type Settings, getLegacyStorageKeys, importLegacyStorageForCurrentUser } from "../lib/alpha-store";
 import { listVoices, speakWith, testKokoroTTS } from "../lib/voice";
 import { ttsManager } from "../lib/audio-subsystem/tts-manager";
 import { listOllamaModels } from "../lib/ollama";
@@ -47,6 +47,7 @@ import {
   downloadAlphaData,
   exportAlphaData,
   importAlphaData,
+  importLegacyMusicForCurrentUser,
   wipeAlphaData,
 } from "../lib/data-portability";
 import { toast } from "sonner";
@@ -126,6 +127,7 @@ function SettingsRoute() {
   const [whisperStatus, setWhisperStatus] = useState<string>("");
   const [musicStatus, setMusicStatus] = useState<string>("");
   const [dataStatus, setDataStatus] = useState<string>("");
+  const [legacyKeys, setLegacyKeys] = useState<string[]>([]);
   const [permRefresh, setPermRefresh] = useState(0);
   const [tracks, setTracks] = useState<MusicTrackMeta[]>([]);
   const [newModel, setNewModel] = useState("");
@@ -149,6 +151,10 @@ function SettingsRoute() {
   useEffect(() => {
     void refreshTracks();
   }, []);
+
+  useEffect(() => {
+    setLegacyKeys(getLegacyStorageKeys());
+  }, [auth.status]);
 
   async function refreshTracks() {
     try {
@@ -202,12 +208,19 @@ function SettingsRoute() {
   async function handleWipe() {
     if (
       !confirm(
-        "This permanently deletes all Alpha data — chat, notes, reminders, memories, settings, and music. This cannot be undone. Continue?",
+        "This permanently deletes Alpha data for the currently signed-in account, including its cloud records. Other accounts and unscoped legacy recovery copies are left untouched. This cannot be undone. Continue?",
       )
     )
       return;
-    setDataStatus("Wiping…");
-    await wipeAlphaData();
+    setDataStatus("Wiping account data…");
+    try {
+      await wipeAlphaData();
+      setDataStatus("Account data deleted.");
+    } catch (error: any) {
+      const message = error?.message || "unknown error";
+      setDataStatus(`Account wipe failed or was incomplete: ${message}`);
+      toast.error(message);
+    }
   }
 
   useEffect(() => {
@@ -844,30 +857,30 @@ function SettingsRoute() {
                 <button
                   type="button"
                   onClick={async () => {
-                    const effectiveUid = auth.status === "authenticated" ? auth.user.uid : "local-user";
+                    if (auth.status !== "authenticated") {
+                      setAlarmStatus("⚠️ Sign in before enabling background push.");
+                      return;
+                    }
                     if (!isPushSupported()) {
                       setAlarmStatus("⚠️ Push notifications are not supported in this browser.");
                       toast.error("Push notifications not supported");
                       return;
                     }
                     const vapidKey = (import.meta.env.VITE_VAPID_PUBLIC_KEY || "") as string;
-                    if (!vapidKey) {
-                      // Fallback test key if none configured in env
-                      const defaultKey = "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U";
-                      const res = await registerPushSubscription(effectiveUid, defaultKey);
-                      if (res.success) {
-                        setAlarmStatus("✅ Background push registered successfully.");
-                        toast.success("Background push notifications enabled");
-                      } else {
-                        setAlarmStatus(`⚠️ Push registration failed: ${res.error?.message || "unknown"}`);
-                        toast.error(res.error?.message || "Push registration failed");
-                      }
+                    if (!vapidKey.trim()) {
+                      setAlarmStatus("⚠️ Background push is not configured: the public VAPID key is missing.");
                       return;
                     }
-                    const res = await registerPushSubscription(effectiveUid, vapidKey);
+                    const permission = await requestBrowserNotificationPermission();
+                    setPermRefresh((prev) => prev + 1);
+                    if (permission.state !== "granted") {
+                      setAlarmStatus("⚠️ Allow browser notifications before enabling background push.");
+                      return;
+                    }
+                    const res = await registerPushSubscription(auth.user.uid, vapidKey.trim());
                     if (res.success) {
-                      setAlarmStatus("✅ Background push registered successfully.");
-                      toast.success("Background push notifications enabled");
+                      setAlarmStatus("✅ Push subscription saved. Scheduled server delivery must also be configured by the app host.");
+                      toast.success("Background push subscription enabled");
                     } else {
                       setAlarmStatus(`⚠️ Push registration failed: ${res.error?.message || "unknown"}`);
                       toast.error(res.error?.message || "Push registration failed");
@@ -880,8 +893,11 @@ function SettingsRoute() {
                 <button
                   type="button"
                   onClick={async () => {
-                    const effectiveUid = auth.status === "authenticated" ? auth.user.uid : "local-user";
-                    const res = await unregisterPushSubscription(effectiveUid);
+                    if (auth.status !== "authenticated") {
+                      setAlarmStatus("⚠️ Sign in to manage this device's push subscription.");
+                      return;
+                    }
+                    const res = await unregisterPushSubscription(auth.user.uid);
                     if (res.success) {
                       setAlarmStatus("✅ Background push unregistered.");
                       toast.success("Background push unregistered");
@@ -992,6 +1008,42 @@ function SettingsRoute() {
             title="Export / Import"
             hint="Back up or move your entire Alpha state — chat, notes, reminders, memories, settings, and music — as one JSON file."
           >
+            {legacyKeys.length > 0 && (
+              <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
+                <div className="text-sm font-semibold">Legacy local data detected</div>
+                <p className="text-xs text-muted-foreground">
+                  Older Alpha versions stored data in a shared browser namespace. It has been left untouched because its original account owner cannot be determined safely. Importing will copy available legacy records into the currently signed-in account; the original copy will remain in this browser.
+                </p>
+                <div className="text-[11px] font-mono text-muted-foreground break-all">
+                  {legacyKeys.length} legacy storage bucket(s) detected.
+                </div>
+                <button
+                  type="button"
+                  disabled={auth.status !== "authenticated"}
+                  onClick={async () => {
+                    const accepted = confirm(
+                      "Import the old shared Alpha data into the currently signed-in account? This may include records created while using another account. Existing account data will not be overwritten, and the old copy will be retained."
+                    );
+                    if (!accepted) return;
+                    try {
+                      const result = importLegacyStorageForCurrentUser();
+                      const musicCopied = await importLegacyMusicForCurrentUser();
+                      setDataStatus(`Legacy import complete: ${result.imported.length} storage bucket(s) and ${musicCopied} music track(s) copied; ${result.skipped.length} existing account bucket(s) left unchanged. Original legacy data was retained.`);
+                      toast.success("Legacy data copied into this account.");
+                    } catch (error: any) {
+                      setDataStatus(`Legacy import failed: ${error?.message || "unknown error"}`);
+                      toast.error(error?.message || "Legacy import failed.");
+                    }
+                  }}
+                  className="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground disabled:opacity-50"
+                >
+                  Import legacy data into this account
+                </button>
+                {auth.status !== "authenticated" && (
+                  <p className="text-xs text-muted-foreground">Sign in before importing legacy data.</p>
+                )}
+              </div>
+            )}
             <div className="flex flex-wrap gap-2 mb-3">
               <button
                 onClick={handleExport}

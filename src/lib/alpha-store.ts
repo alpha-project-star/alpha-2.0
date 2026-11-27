@@ -185,6 +185,9 @@ export const K = {
   settings: "alpha.settings.v1",
   summary: "alpha.summary.v1",
   composerText: "alpha.composerText.v1",
+  reminderContext: "alpha.reminder_context.v1",
+  deliveries: "alpha.deliveries.v1",
+  acknowledgements: "alpha.acknowledgements.v1",
 };
 
 const DEFAULT_SETTINGS: Settings = {
@@ -342,13 +345,16 @@ export class PersistenceError extends Error {
 
 import { auth } from "./firebase";
 
-let currentStoreUid: string = "local-user";
+let currentStoreUid: string | null = auth.currentUser?.uid ?? null;
 
 export const ALPHA_USER_KEY_PREFIXES: readonly string[] = [
   ...Object.values(K),
   "alpha.reminders.v1",
   "alpha.deliveries.v1",
-  "alpha.reminder_context.v1",
+  "alpha.cloudSync.v1",
+  "alpha.nextSeq.v1",
+  "alpha.chat_session",
+  "alpha.internal_session",
   "alpha.proactive.lastBrief",
   "alpha.proactive.lastBillsNudge",
   "alpha.proactive.lastPlansNudge",
@@ -364,7 +370,8 @@ export function isKeyForUid(key: string, uid: string): boolean {
   if (!key || !uid) return false;
 
   for (let i = 0; i < ALPHA_USER_KEY_PREFIXES.length; i++) {
-    if (key === `${ALPHA_USER_KEY_PREFIXES[i]}.${uid}`) {
+    const prefix = ALPHA_USER_KEY_PREFIXES[i];
+    if (key === `${prefix}.${uid}` || (key.startsWith(`${prefix}.`) && key.endsWith(`.${uid}`))) {
       return true;
     }
   }
@@ -372,92 +379,104 @@ export function isKeyForUid(key: string, uid: string): boolean {
 }
 
 export function isAlphaKeyPrefix(key: string): boolean {
-  return ALPHA_USER_KEY_PREFIXES.some((prefix) => key === prefix || key.startsWith(prefix));
+  return ALPHA_USER_KEY_PREFIXES.some((prefix) => key === prefix || key.startsWith(`${prefix}.`));
 }
 
 /**
- * Returns the stable canonical key for Alpha's single-user local storage.
- * All Alpha data is now stored under the base key with no UID scoping to ensure
- * data persistence across restarts and auth state changes.
+ * Alpha's browser persistence is isolated by Firebase UID. Legacy unscoped
+ * keys are intentionally left untouched until the user explicitly imports them.
  */
-export function getKey(baseKey: string): string {
-  if (!isAlphaKeyPrefix(baseKey)) {
-    return baseKey;
-  }
-  // All Alpha data now uses the stable "local-user" identity or the base key directly.
-  // We prefer the base key directly for a clean namespace.
-  return baseKey;
+export function getKey(baseKey: string, uid: string | null = currentStoreUid): string {
+  if (!isAlphaKeyPrefix(baseKey)) return baseKey;
+  return `${baseKey}.${uid || "unauthenticated"}`;
 }
 
 export function getCurrentStoreUser(): string {
-  return "local-user";
+  return currentStoreUid || "unauthenticated";
 }
 
-/**
- * Sets the active storage scope. In the single-user Alpha architecture, this is 
- * now a no-op that preserves the stable local identity.
- */
 export function setStoreUser(uid: string | null) {
-  // Stable identity is maintained regardless of Firebase auth state.
+  if (currentStoreUid === uid) return;
+  currentStoreUid = uid;
   reloadState();
   emit();
 }
 
-/**
- * Migrates legacy UID-scoped storage keys to the canonical base keys.
- * This ensures users don't lose data during the transition to the stable local identity.
- */
-function migrateLegacyScopedKeys() {
+/** Returns unscoped legacy Alpha keys without modifying or deleting them. */
+function collectLegacyStorageKeys(storage: Storage): string[] {
+  const keys = new Set<string>();
+  for (const prefix of ALPHA_USER_KEY_PREFIXES) {
+    if (prefix === "alpha.cloudSync.v1") continue;
+    const value = storage.getItem(prefix);
+    if (value !== null && value.trim() !== "") keys.add(prefix);
+  }
+
+  // Session records used dynamic base keys before UID scoping. Only import the
+  // unscoped .v1 form; keys already ending in a UID remain account-specific.
+  for (let index = 0; index < storage.length; index++) {
+    const key = storage.key(index);
+    if (key && /^alpha\.(?:chat_session|internal_session)\..+\.v1$/.test(key)) {
+      keys.add(key);
+    }
+  }
+  return Array.from(keys);
+}
+
+/** Returns unscoped legacy Alpha keys without modifying or deleting them. */
+export function getLegacyStorageKeys(): string[] {
   const storage = getStorage();
-  if (!storage) return;
+  return storage ? collectLegacyStorageKeys(storage) : [];
+}
 
-  const keysToMigrate: { from: string; to: string }[] = [];
-  
-  for (let i = 0; i < storage.length; i++) {
-    const key = storage.key(i);
-    if (!key) continue;
+/**
+ * Explicitly imports legacy unscoped data into the currently authenticated
+ * user's namespace. Original keys are retained as a recovery copy. Existing
+ * UID-scoped values are never overwritten.
+ */
+export function importLegacyStorageForCurrentUser(): { imported: string[]; skipped: string[] } {
+  const storage = getStorage();
+  if (!storage) throw new PersistenceError("localStorage", new Error("Browser storage is unavailable."));
+  if (!currentStoreUid) throw new PersistenceError("localStorage", new Error("Sign in before importing legacy Alpha data."));
+  const imported: string[] = [];
+  const skipped: string[] = [];
 
-    for (const prefix of ALPHA_USER_KEY_PREFIXES) {
-      if (key.startsWith(`${prefix}.`) && key !== prefix) {
-        keysToMigrate.push({ from: key, to: prefix });
-        break;
-      }
+  for (const prefix of collectLegacyStorageKeys(storage)) {
+    const legacyValue = storage.getItem(prefix);
+    if (legacyValue === null || legacyValue.trim() === "") continue;
+    const scopedKey = getKey(prefix, currentStoreUid);
+    const scopedValue = storage.getItem(scopedKey);
+    if (scopedValue !== null && scopedValue.trim() !== "") {
+      skipped.push(prefix);
+      continue;
     }
+
+    let valueToImport = legacyValue;
+    if (prefix === "alpha.reminders.v1") {
+      const records = JSON.parse(legacyValue);
+      if (!Array.isArray(records)) throw new PersistenceError(prefix, new Error("Legacy reminders are not a valid list."));
+      valueToImport = JSON.stringify(records.map((record) => ({ ...record, userId: currentStoreUid })));
+    } else if (prefix === "alpha.reminder_context.v1") {
+      const record = JSON.parse(legacyValue);
+      valueToImport = JSON.stringify({
+        ...record,
+        userId: currentStoreUid,
+        context: record.context ? { ...record.context, userId: currentStoreUid } : null,
+        pendingClarification: record.pendingClarification
+          ? { ...record.pendingClarification, userId: currentStoreUid }
+          : null,
+      });
+    } else if (prefix === "alpha.acknowledgements.v1" || prefix === "alpha.deliveries.v1") {
+      const records = JSON.parse(legacyValue);
+      if (!Array.isArray(records)) throw new PersistenceError(prefix, new Error("Legacy notification records are not a valid list."));
+      valueToImport = JSON.stringify(records.map((record) => ({ ...record, userId: currentStoreUid })));
+    }
+    storage.setItem(scopedKey, valueToImport);
+    imported.push(prefix);
   }
 
-  for (const { from, to } of keysToMigrate) {
-    const data = storage.getItem(from);
-    if (data) {
-      const existing = storage.getItem(to);
-      if (!existing || existing === "[]" || existing === "{}" || existing.trim() === "") {
-        // Safe to migrate if target is empty
-        storage.setItem(to, data);
-      } else {
-        // If both exist, we may need to merge for certain keys (like reminders)
-        if (to === "alpha.reminders.v1") {
-          try {
-            const fromList = JSON.parse(data);
-            const toList = JSON.parse(existing);
-            if (Array.isArray(fromList) && Array.isArray(toList)) {
-              // Merge reminders, updating userId to 'local-user'
-              const merged = [...toList];
-              for (const item of fromList) {
-                if (!merged.some(r => r.id === item.id)) {
-                  merged.push({ ...item, userId: "local-user" });
-                }
-              }
-              storage.setItem(to, JSON.stringify(merged));
-            }
-          } catch (e) {
-            console.error("Failed to merge reminders during migration:", e);
-          }
-        }
-        // For other keys, we prioritize the existing canonical key or just skip
-      }
-      // Remove the legacy key after migration attempt
-      storage.removeItem(from);
-    }
-  }
+  reloadState();
+  emit();
+  return { imported, skipped };
 }
 
 /**
@@ -479,11 +498,7 @@ function parseLS<T>(key: string, schema: z.ZodType<T>, fallback: T): T {
   const storage = getStorage();
   if (!storage) return fallback;
   const targetKey = getKey(key);
-  let v = storage.getItem(targetKey);
-  if ((v === null || v === undefined || typeof v !== "string" || v.trim() === "") && key === K.settings) {
-    const unauthKey = `${K.settings}.unauthenticated`;
-    v = storage.getItem(unauthKey) || storage.getItem(K.settings);
-  }
+  const v = storage.getItem(targetKey);
   if (v === null || v === undefined || typeof v !== "string" || v.trim() === "") return fallback;
   let parsed: unknown;
   try {
@@ -498,7 +513,7 @@ function parseLS<T>(key: string, schema: z.ZodType<T>, fallback: T): T {
       const merged = { ...(fallback as any), ...parsed };
       const retry = schema.safeParse(merged);
       if (retry.success) return retry.data;
-      return merged as T;
+      return fallback;
     }
     return fallback;
   }
@@ -546,15 +561,14 @@ export function writeLS<T>(key: string, v: T): { status: "success" | "unavailabl
 }
 
 // Initial bootstrap check
-if (typeof window !== "undefined") {
-  migrateLegacyScopedKeys();
-  if (auth.currentUser) {
-    currentStoreUid = "local-user";
-  }
+if (typeof window !== "undefined" && auth.currentUser) {
+  currentStoreUid = auth.currentUser.uid;
 }
 
 let state: AlphaState = {
   chat: parseLS<ChatMessage[]>(K.chat, z.array(ChatMessageSchema), []),
+  sessions: parseLS<ChatSession[]>(K.sessions, z.array(ChatSessionSchema), [{ id: "default", title: "Main Conversation", createdAt: Date.now(), updatedAt: Date.now() }]),
+  activeSessionId: parseLS<string>(K.activeSessionId, z.string(), "default"),
   internalHistory: parseLS<ChatMessage[]>(K.internalHistory, z.array(ChatMessageSchema), []),
   notes: parseLS<Note[]>(K.notes, z.array(NoteSchema), []),
   bills: parseLS<Bill[]>(K.bills, z.array(BillSchema), []),
@@ -655,6 +669,7 @@ if (typeof window !== "undefined") {
 }
 
 const getSnapshot = () => state;
+const serverSnap: AlphaState = state;
 const getServerSnapshot = () => serverSnap;
 
 export function useAlpha<T>(selector: (s: AlphaState) => T): T {
@@ -688,7 +703,6 @@ function hydrateImages(msgs: ChatMessage[]): ChatMessage[] {
 function reloadState() {
   const storage = getStorage();
   if (!storage) return;
-  migrateLegacyScopedKeys();
   const rawSessions = parseLS<ChatSession[]>(K.sessions, z.array(ChatSessionSchema), []);
   const defaultSessions: ChatSession[] = rawSessions.length > 0 ? rawSessions : [
     { id: "default", title: "Main Conversation", createdAt: Date.now(), updatedAt: Date.now() }
@@ -710,7 +724,7 @@ function reloadState() {
     results: parseLS<Result[]>(K.results, z.array(z.any()), []),
     memories: parseLS<Memory[]>(K.memories, z.array(MemorySchema), []),
     profile: parseLS<Profile>(K.profile, ProfileSchema, { name: "", bio: "" }),
-    settings: parseLS<Settings>(K.settings, SettingsSchema, state?.settings || DEFAULT_SETTINGS),
+    settings: parseLS<Settings>(K.settings, SettingsSchema, DEFAULT_SETTINGS),
     composerText: parseLS<string>(K.composerText, z.string(), ""),
   };
 }
@@ -720,8 +734,31 @@ function upsert<T extends { id: string }>(list: T[], item: T): T[] {
   return i >= 0 ? list.map((x) => (x.id === item.id ? item : x)) : [item, ...list];
 }
 
+function queueCloudUpsert(
+  collectionName: "memories" | "notes" | "tasks" | "bills" | "goals",
+  item: { id: string },
+): void {
+  void import("./cloud-sync")
+    .then(({ syncDocToCloud }) => syncDocToCloud(collectionName, item.id, item))
+    .catch((error) => console.warn("[CloudSync] Could not queue local upsert:", error));
+}
+
+function queueCloudDelete(
+  collectionName: "memories" | "notes" | "tasks" | "bills" | "goals",
+  id: string,
+): void {
+  void import("./cloud-sync")
+    .then(({ deleteDocFromCloud }) => deleteDocFromCloud(collectionName, id))
+    .catch((error) => console.warn("[CloudSync] Could not queue local delete:", error));
+}
+
 export const alphaStore = {
   get: () => state,
+  /** Reload the active UID's persisted data after account changes or a wipe. */
+  reloadFromStorage(): void {
+    reloadState();
+    emit();
+  },
   /** Subscribe to any persisted state change. Returns an unsubscribe fn. */
   sub: (l: () => void) => subscribe(l),
   setSettings(patch: Partial<Settings>): Promise<void> {
@@ -777,7 +814,7 @@ export const alphaStore = {
 
       // Ensure newly recorded messages receive unique, monotonically increasing sequence numbers
       const storage = getStorage();
-      const seqKey = "alpha.nextSeq.v1";
+      const seqKey = getKey("alpha.nextSeq.v1");
       let nextSeq = Number(storage?.getItem(seqKey) || "0");
       
       // Safety: ensure nextSeq is at least as high as any existing message in state
@@ -904,8 +941,8 @@ export const alphaStore = {
 
       const storage = getStorage();
       try {
-        storage?.removeItem(getScopedKey(`alpha.chat_session.${sessionId}.v1`));
-        storage?.removeItem(getScopedKey(`alpha.internal_session.${sessionId}.v1`));
+        storage?.removeItem(getKey(`alpha.chat_session.${sessionId}.v1`));
+        storage?.removeItem(getKey(`alpha.internal_session.${sessionId}.v1`));
       } catch {}
 
       writeLS(K.sessions, remainingSessions);
@@ -943,7 +980,7 @@ export const alphaStore = {
 
       // Maintain sequence integrity: allocate unique, monotonic sequence numbers,
       // preserve legacy ordering for missing sequences, and advance the global counter.
-      const seqKey = "alpha.nextSeq.v1";
+      const seqKey = getKey("alpha.nextSeq.v1");
 
       // Any message currently in internalHistory whose ID is not in msgs persists.
       // Its sequence number must be protected from collision.
@@ -1041,6 +1078,7 @@ export const alphaStore = {
       reloadState();
       const next = upsert(state.notes, n);
       writeLS(K.notes, next);
+      queueCloudUpsert("notes", n);
       state = { ...state, notes: next };
       emit();
     });
@@ -1050,6 +1088,7 @@ export const alphaStore = {
       reloadState();
       const next = state.notes.filter((x) => x.id !== id);
       writeLS(K.notes, next);
+      queueCloudDelete("notes", id);
       state = { ...state, notes: next };
       emit();
     });
@@ -1059,6 +1098,7 @@ export const alphaStore = {
       reloadState();
       const next = upsert(state.bills, b);
       writeLS(K.bills, next);
+      queueCloudUpsert("bills", b);
       state = { ...state, bills: next };
       emit();
     });
@@ -1068,6 +1108,7 @@ export const alphaStore = {
       reloadState();
       const next = state.bills.filter((x) => x.id !== id);
       writeLS(K.bills, next);
+      queueCloudDelete("bills", id);
       state = { ...state, bills: next };
       emit();
     });
@@ -1077,6 +1118,7 @@ export const alphaStore = {
       reloadState();
       const next = upsert(state.tasks, t);
       writeLS(K.tasks, next);
+      queueCloudUpsert("tasks", t);
       state = { ...state, tasks: next };
       emit();
     });
@@ -1086,6 +1128,7 @@ export const alphaStore = {
       reloadState();
       const next = state.tasks.filter((x) => x.id !== id);
       writeLS(K.tasks, next);
+      queueCloudDelete("tasks", id);
       state = { ...state, tasks: next };
       emit();
     });
@@ -1095,6 +1138,7 @@ export const alphaStore = {
       reloadState();
       const next = upsert(state.goals, g);
       writeLS(K.goals, next);
+      queueCloudUpsert("goals", g);
       state = { ...state, goals: next };
       emit();
     });
@@ -1104,6 +1148,7 @@ export const alphaStore = {
       reloadState();
       const next = state.goals.filter((x) => x.id !== id);
       writeLS(K.goals, next);
+      queueCloudDelete("goals", id);
       state = { ...state, goals: next };
       emit();
     });
@@ -1217,6 +1262,7 @@ export const alphaStore = {
         nextMemories = upsert(state.memories, cleanMem);
       }
       writeLS(K.memories, nextMemories);
+      queueCloudUpsert("memories", cleanMem);
       state = { ...state, memories: nextMemories };
       emit();
     });
@@ -1226,6 +1272,7 @@ export const alphaStore = {
       reloadState();
       const next = state.memories.filter((x) => x.id !== id);
       writeLS(K.memories, next);
+      queueCloudDelete("memories", id);
       state = { ...state, memories: next };
       emit();
     });

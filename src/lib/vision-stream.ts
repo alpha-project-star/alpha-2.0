@@ -57,7 +57,8 @@ export async function startEye(): Promise<void> {
     audio: false,
   });
 
-  // Verify that we haven't been superseded or unmounted
+  // A stop or a newer start invalidates this request. Always release a
+  // stream acquired by a stale request before returning.
   if (startId !== currentStartId) {
     for (const t of s.getTracks()) t.stop();
     throw new Error("Camera startup was superseded.");
@@ -82,20 +83,26 @@ export async function startEye(): Promise<void> {
   try {
     await video.play();
   } catch (err: any) {
-    // Playback failed. Release everything cleanly and throw
+    // Release only resources still owned by this start request. A newer
+    // start may already have installed a different stream on the video.
     for (const t of s.getTracks()) t.stop();
-    stream = null;
-    video.srcObject = null;
-    notifyActive(false);
+    if (stream === s) {
+      stream = null;
+      if (video?.srcObject === s) video.srcObject = null;
+      notifyActive(false);
+    }
     throw new Error(`Camera playback failed: ${err?.message || "unsupported browser background context"}`);
   }
 
-  // Double check if we were cancelled during the async playback step
+  // Double check if we were cancelled during the async playback step.
+  // Never clear a newer request's stream while cleaning up this one.
   if (startId !== currentStartId) {
     for (const t of s.getTracks()) t.stop();
-    stream = null;
-    video.srcObject = null;
-    notifyActive(false);
+    if (stream === s) {
+      stream = null;
+      if (video?.srcObject === s) video.srcObject = null;
+      notifyActive(false);
+    }
     throw new Error("Camera startup cancelled.");
   }
 
@@ -104,7 +111,9 @@ export async function startEye(): Promise<void> {
 }
 
 export function stopEye(): void {
-  currentStartId = 0; // Invalidate any pending startEye
+  // Use a monotonically increasing generation. Resetting to zero can let an
+  // older pending request collide with a later start that reuses the same ID.
+  currentStartId += 1; // Invalidate every pending startEye
   if (sampleTimer != null) { clearInterval(sampleTimer); sampleTimer = null; }
   if (stream) {
     for (const t of stream.getTracks()) t.stop();

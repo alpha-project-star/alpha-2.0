@@ -9,16 +9,23 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ApiPushCronRouteImport } from './routes/api.push.cron'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as BillsRouteImport } from './routes/bills'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as ImageRouteImport } from './routes/image'
 import { Route as MemoriesRouteImport } from './routes/memories'
+import { Route as MultimodalRouteImport } from './routes/multimodal'
 import { Route as NotesRouteImport } from './routes/notes'
 import { Route as PlansRouteImport } from './routes/plans'
 import { Route as RemindersRouteImport } from './routes/reminders'
 import { Route as SettingsRouteImport } from './routes/settings'
 
+const ApiPushCronRoute = ApiPushCronRouteImport.update({
+  id: '/api/push/cron',
+  path: '/api/push/cron',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -44,6 +51,11 @@ const MemoriesRoute = MemoriesRouteImport.update({
   path: '/memories',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MultimodalRoute = MultimodalRouteImport.update({
+  id: '/multimodal',
+  path: '/multimodal',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const NotesRoute = NotesRouteImport.update({
   id: '/notes',
   path: '/notes',
@@ -66,22 +78,26 @@ const SettingsRoute = SettingsRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
+  '/api/push/cron': typeof ApiPushCronRoute
   '/': typeof IndexRoute
   '/bills': typeof BillsRoute
   '/chat': typeof ChatRoute
   '/image': typeof ImageRoute
   '/memories': typeof MemoriesRoute
+  '/multimodal': typeof MultimodalRoute
   '/notes': typeof NotesRoute
   '/plans': typeof PlansRoute
   '/reminders': typeof RemindersRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesByTo {
+  '/api/push/cron': typeof ApiPushCronRoute
   '/': typeof IndexRoute
   '/bills': typeof BillsRoute
   '/chat': typeof ChatRoute
   '/image': typeof ImageRoute
   '/memories': typeof MemoriesRoute
+  '/multimodal': typeof MultimodalRoute
   '/notes': typeof NotesRoute
   '/plans': typeof PlansRoute
   '/reminders': typeof RemindersRoute
@@ -89,11 +105,13 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/api/push/cron': typeof ApiPushCronRoute
   '/': typeof IndexRoute
   '/bills': typeof BillsRoute
   '/chat': typeof ChatRoute
   '/image': typeof ImageRoute
   '/memories': typeof MemoriesRoute
+  '/multimodal': typeof MultimodalRoute
   '/notes': typeof NotesRoute
   '/plans': typeof PlansRoute
   '/reminders': typeof RemindersRoute
@@ -102,33 +120,39 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
+    | '/api/push/cron'
     | '/'
     | '/bills'
     | '/chat'
     | '/image'
     | '/memories'
+    | '/multimodal'
     | '/notes'
     | '/plans'
     | '/reminders'
     | '/settings'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/api/push/cron'
     | '/'
     | '/bills'
     | '/chat'
     | '/image'
     | '/memories'
+    | '/multimodal'
     | '/notes'
     | '/plans'
     | '/reminders'
     | '/settings'
   id:
     | '__root__'
+    | '/api/push/cron'
     | '/'
     | '/bills'
     | '/chat'
     | '/image'
     | '/memories'
+    | '/multimodal'
     | '/notes'
     | '/plans'
     | '/reminders'
@@ -136,11 +160,13 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  ApiPushCronRoute: typeof ApiPushCronRoute
   IndexRoute: typeof IndexRoute
   BillsRoute: typeof BillsRoute
   ChatRoute: typeof ChatRoute
   ImageRoute: typeof ImageRoute
   MemoriesRoute: typeof MemoriesRoute
+  MultimodalRoute: typeof MultimodalRoute
   NotesRoute: typeof NotesRoute
   PlansRoute: typeof PlansRoute
   RemindersRoute: typeof RemindersRoute
@@ -149,6 +175,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/api/push/cron': {
+      id: '/api/push/cron'
+      path: '/api/push/cron'
+      fullPath: '/api/push/cron'
+      preLoaderRoute: typeof ApiPushCronRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -184,6 +217,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MemoriesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/multimodal': {
+      id: '/multimodal'
+      path: '/multimodal'
+      fullPath: '/multimodal'
+      preLoaderRoute: typeof MultimodalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/notes': {
       id: '/notes'
       path: '/notes'
@@ -216,11 +256,13 @@ declare module '@tanstack/react-router' {
 }
 
 const rootRouteChildren: RootRouteChildren = {
+  ApiPushCronRoute: ApiPushCronRoute,
   IndexRoute: IndexRoute,
   BillsRoute: BillsRoute,
   ChatRoute: ChatRoute,
   ImageRoute: ImageRoute,
   MemoriesRoute: MemoriesRoute,
+  MultimodalRoute: MultimodalRoute,
   NotesRoute: NotesRoute,
   PlansRoute: PlansRoute,
   RemindersRoute: RemindersRoute,

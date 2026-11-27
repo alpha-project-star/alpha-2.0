@@ -273,7 +273,7 @@ export function validateTurnIntegrity(messages: ChatMessage[]): ChatMessage[] {
       const callIds: string[] = [];
       let callIdsValid = true;
 
-      for (const tc of modelMsg.tool_calls) {
+      for (const tc of modelMsg.tool_calls ?? []) {
         const id = tc?.id;
         if (!id || typeof id !== "string" || id.trim().length === 0) {
           callIdsValid = false;

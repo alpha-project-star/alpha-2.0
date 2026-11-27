@@ -67,9 +67,7 @@ export function withCrossContextLock<T>(
   options?: CrossContextLockOptions,
 ): Promise<T> {
   if (isCrossContextLockSupported()) {
-    return navigator.locks.request(lockName, { mode: 'exclusive' }, async () => {
-      return await fn();
-    });
+    return navigator.locks.request<T>(lockName, { mode: 'exclusive' }, () => fn() as T);
   }
 
   if (options?.requireCrossContextExclusion) {
@@ -117,7 +115,9 @@ export function withCrossContextLock<T>(
         inMemoryLocks.delete(lockName);
       }
       releaseLock();
-      throw err;
+      // Match navigator.locks.request: synchronous callback failures become
+      // rejected promises because this API always returns Promise<T>.
+      return Promise.reject(err);
     }
   } else {
     let releaseLock!: () => void;

@@ -1,12 +1,13 @@
 // src/lib/notification-delivery.ts
 
-import { alphaStore, getStorage, type ChatMessage } from './alpha-store';
+import { alphaStore, getStorage, getKey, getCurrentStoreUser, type ChatMessage } from './alpha-store';
 import { waitForChatIdle } from './alpha.functions';
 import { reminderContextManager } from './reminder-context';
 import { notificationAcknowledgementManager } from './notification-acknowledgement';
 import { notificationChannelRegistry } from './notification-channel-registry';
 import { withCrossContextLock } from './cross-context-lock';
 import { alphaGate } from './alpha-gate';
+import { syncDeliveryToCloud } from './notification-cloud-sync';
 
 export type NotificationChannel = 'in_app' | string;
 
@@ -154,7 +155,7 @@ export class LocalDeliveryRepository implements DeliveryRepository {
   private inMemoryFallback = new Map<string, DeliveryRecord>();
 
   private getStorageKey(userId: string): string {
-    return `${STORAGE_PREFIX}.${userId}`;
+    return getKey(STORAGE_PREFIX, userId);
   }
 
   async getDelivery(userId: string, deliveryId: string): Promise<DeliveryRecord | null> {
@@ -182,6 +183,7 @@ export class LocalDeliveryRepository implements DeliveryRepository {
     const storage = getStorage();
     if (!storage) {
       this.inMemoryFallback.set(`${userId}:${delivery.deliveryId}`, { ...delivery });
+      void syncDeliveryToCloud(userId, delivery);
       return;
     }
     await withCrossContextLock(`alpha_delivery_repo_${userId}`, async () => {
@@ -201,6 +203,7 @@ export class LocalDeliveryRepository implements DeliveryRepository {
         list.push({ ...delivery });
       }
       storage.setItem(key, JSON.stringify(list));
+      void syncDeliveryToCloud(userId, delivery);
     });
   }
 
@@ -209,8 +212,9 @@ export class LocalDeliveryRepository implements DeliveryRepository {
     if (!storage) {
       const item = this.inMemoryFallback.get(`${userId}:${deliveryId}`);
       if (!item) throw new Error(`Delivery record not found: ${deliveryId}`);
-      const updated = { ...item, ...patch, updatedAt: Date.now() };
+      const updated = { ...item, ...patch, userId, updatedAt: Date.now() };
       this.inMemoryFallback.set(`${userId}:${deliveryId}`, updated);
+      void syncDeliveryToCloud(userId, updated);
       return;
     }
     await withCrossContextLock(`alpha_delivery_repo_${userId}`, async () => {
@@ -225,8 +229,9 @@ export class LocalDeliveryRepository implements DeliveryRepository {
       } catch {}
       const idx = list.findIndex((d) => d.deliveryId === deliveryId && d.userId === userId);
       if (idx < 0) throw new Error(`Delivery record not found: ${deliveryId}`);
-      list[idx] = { ...list[idx], ...patch, updatedAt: Date.now() };
+      list[idx] = { ...list[idx], ...patch, userId, updatedAt: Date.now() };
       storage.setItem(key, JSON.stringify(list));
+      void syncDeliveryToCloud(userId, list[idx]);
     });
   }
 
@@ -243,23 +248,49 @@ export class LocalDeliveryRepository implements DeliveryRepository {
       const raw = storage.getItem(this.getStorageKey(userId));
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      return Array.isArray(parsed) ? parsed.filter((record: DeliveryRecord) => record.userId === userId) : [];
     } catch {
       return [];
     }
   }
 
-  clear(): void {
-    this.inMemoryFallback.clear();
+  async replaceAllFromCloud(userId: string, records: DeliveryRecord[]): Promise<void> {
     const storage = getStorage();
-    if (storage) {
-      const keysToRemove: string[] = [];
-      for (let i = 0; i < storage.length; i++) {
-        const k = storage.key(i);
-        if (k && k.startsWith(STORAGE_PREFIX)) keysToRemove.push(k);
+    await withCrossContextLock(`alpha_delivery_repo_${userId}`, async () => {
+      const merged = new Map<string, DeliveryRecord>(
+        records.filter((record) => record.userId === userId).map((record) => [record.deliveryId, { ...record }]),
+      );
+
+      // Re-read under the lock so a local write that happened after the cloud
+      // snapshot was received cannot be overwritten by stale reconciliation.
+      const local = await this.listDeliveries(userId);
+      for (const record of local) {
+        const remote = merged.get(record.deliveryId);
+        if (!remote || record.updatedAt > remote.updatedAt) {
+          merged.set(record.deliveryId, record);
+          void syncDeliveryToCloud(userId, record);
+        }
       }
-      keysToRemove.forEach((k) => storage.removeItem(k));
+
+      const values = Array.from(merged.values());
+      if (storage) {
+        storage.setItem(this.getStorageKey(userId), JSON.stringify(values));
+      } else {
+        for (const key of this.inMemoryFallback.keys()) {
+          if (key.startsWith(`${userId}:`)) this.inMemoryFallback.delete(key);
+        }
+        for (const record of values) {
+          this.inMemoryFallback.set(`${userId}:${record.deliveryId}`, { ...record });
+        }
+      }
+    });
+  }
+
+  clear(userId: string = getCurrentStoreUser()): void {
+    for (const key of this.inMemoryFallback.keys()) {
+      if (key.startsWith(`${userId}:`)) this.inMemoryFallback.delete(key);
     }
+    getStorage()?.removeItem(this.getStorageKey(userId));
   }
 }
 
@@ -319,11 +350,11 @@ export class NotificationDeliveryManager {
     // 1. Authentication Check
     if (!rawAuth || typeof rawAuth !== 'string' || !rawAuth.trim()) {
       return {
-        success: false,
+        success: false as const,
         eventId: rawRecord?.eventId || '',
         messageId: rawRecord?.messageId,
         channel: typeof rawChannel === 'string' ? rawChannel : undefined,
-        status: 'rejected',
+        status: 'rejected' as const,
         error: {
           code: 'UNAUTHENTICATED',
           message: 'Authenticated user ID is required for notification delivery',
@@ -349,11 +380,11 @@ export class NotificationDeliveryManager {
       !rawRecord.text.trim()
     ) {
       return {
-        success: false,
+        success: false as const,
         eventId: rawRecord?.eventId || '',
         messageId: rawRecord?.messageId,
         channel: typeof rawChannel === 'string' ? rawChannel : undefined,
-        status: 'rejected',
+        status: 'rejected' as const,
         error: {
           code: 'INVALID_INPUT',
           message: 'Valid ProactiveResponseRecord with non-empty eventId, reminderId, userId, messageId, and text is required',
@@ -364,11 +395,11 @@ export class NotificationDeliveryManager {
     // 3. User Isolation / Identity Match
     if (rawRecord.userId !== authUser) {
       return {
-        success: false,
+        success: false as const,
         eventId: rawRecord.eventId,
         messageId: rawRecord.messageId,
         channel: typeof rawChannel === 'string' ? rawChannel : undefined,
-        status: 'rejected',
+        status: 'rejected' as const,
         error: {
           code: 'USER_MISMATCH',
           message: `User isolation violation: record user ${rawRecord.userId} does not match authenticated user ${authUser}`,
@@ -380,11 +411,11 @@ export class NotificationDeliveryManager {
     const requestedChannel = rawChannel ?? 'in_app';
     if (!requestedChannel || typeof requestedChannel !== 'string' || !requestedChannel.trim()) {
       return {
-        success: false,
+        success: false as const,
         eventId: rawRecord.eventId,
         messageId: rawRecord.messageId,
         channel: String(requestedChannel || ''),
-        status: 'rejected',
+        status: 'rejected' as const,
         error: {
           code: 'UNSUPPORTED_CHANNEL',
           message: `Channel "${requestedChannel}" is not supported. Active channel: in_app`,
@@ -397,11 +428,11 @@ export class NotificationDeliveryManager {
 
     if (resolution.status === 'unsupported') {
       return {
-        success: false,
+        success: false as const,
         eventId: rawRecord.eventId,
         messageId: rawRecord.messageId,
         channel,
-        status: 'rejected',
+        status: 'rejected' as const,
         error: {
           code: 'UNSUPPORTED_CHANNEL',
           message: resolution.error || `Channel "${channel}" is not supported. Active channel: in_app`,
@@ -411,11 +442,11 @@ export class NotificationDeliveryManager {
 
     if (resolution.status === 'unavailable') {
       return {
-        success: false,
+        success: false as const,
         eventId: rawRecord.eventId,
         messageId: rawRecord.messageId,
         channel,
-        status: 'rejected',
+        status: 'rejected' as const,
         error: {
           code: 'CHANNEL_UNAVAILABLE',
           message: resolution.error || `Channel "${channel}" is currently unavailable in this environment.`,
@@ -448,12 +479,12 @@ export class NotificationDeliveryManager {
 
       if (!channelResult.success) {
         return {
-          success: false,
+          success: false as const,
           deliveryId: channelResult.deliveryId || deliveryId,
           eventId: channelResult.eventId,
           messageId: channelResult.messageId || rawRecord.messageId,
           channel,
-          status: 'rejected',
+          status: 'rejected' as const,
           error: {
             code: (channelResult.error?.code as DeliveryErrorCode) || 'DELIVERY_FAILED',
             message: channelResult.error?.message || 'Delivery failed',
@@ -462,7 +493,7 @@ export class NotificationDeliveryManager {
       }
 
       return {
-        success: true,
+        success: true as const,
         deliveryId: channelResult.deliveryId || deliveryId,
         eventId: channelResult.eventId,
         messageId: channelResult.messageId || rawRecord.messageId,
@@ -475,12 +506,12 @@ export class NotificationDeliveryManager {
     // 5. In-flight local process concurrency check
     if (this.inFlightClaims.has(deliveryId)) {
       return {
-        success: false,
+        success: false as const,
         deliveryId,
         eventId: rawRecord.eventId,
         messageId: rawRecord.messageId,
         channel,
-        status: 'rejected',
+        status: 'rejected' as const,
         error: {
           code: 'DELIVERY_IN_PROGRESS',
           message: `Delivery for ${deliveryId} is currently in progress`,
@@ -490,7 +521,9 @@ export class NotificationDeliveryManager {
 
     // 6, 7, 8. Check Repository State, Idempotency, and Acquire Claim via Cross-Context Lock
     const lockName = `alpha_delivery_lock_${authUser}_${deliveryId}`;
-    const claimResult = await withCrossContextLock(lockName, async () => {
+    const claimResult = await withCrossContextLock<
+      { status: "resolved"; result: NotificationDeliveryResult } | { status: "acquired" }
+    >(lockName, async () => {
       if (this.repo) {
         try {
           const existing = await this.repo.getDelivery(authUser, deliveryId);
@@ -515,12 +548,12 @@ export class NotificationDeliveryManager {
               return {
                 status: 'resolved' as const,
                 result: {
-                  success: true,
+                  success: true as const,
                   deliveryId,
                   eventId: rawRecord.eventId,
                   messageId: existing.messageId || rawRecord.messageId,
                   channel,
-                  status: 'already_delivered',
+                  status: 'already_delivered' as const,
                   deliveredAt: existing.deliveredAt || Date.now(),
                 },
               };
@@ -532,12 +565,12 @@ export class NotificationDeliveryManager {
                 return {
                   status: 'resolved' as const,
                   result: {
-                    success: false,
+                    success: false as const,
                     deliveryId,
                     eventId: rawRecord.eventId,
                     messageId: rawRecord.messageId,
                     channel,
-                    status: 'rejected',
+                    status: 'rejected' as const,
                     error: {
                       code: 'DELIVERY_IN_PROGRESS',
                       message: 'Delivery claim is actively held by another process (delivery in progress)',
@@ -551,12 +584,12 @@ export class NotificationDeliveryManager {
           return {
             status: 'resolved' as const,
             result: {
-              success: false,
+              success: false as const,
               deliveryId,
               eventId: rawRecord.eventId,
               messageId: rawRecord.messageId,
               channel,
-              status: 'failed',
+              status: 'failed' as const,
               error: {
                 code: 'PERSISTENCE_FAILURE',
                 message: `Failed reading delivery repository: ${err?.message}`,
@@ -597,12 +630,12 @@ export class NotificationDeliveryManager {
         return {
           status: 'resolved' as const,
           result: {
-            success: true,
+            success: true as const,
             deliveryId,
             eventId: rawRecord.eventId,
             messageId: chatMsg.id,
             channel,
-            status: 'already_delivered',
+            status: 'already_delivered' as const,
             deliveredAt: chatMsg.ts,
           },
         };
@@ -636,12 +669,12 @@ export class NotificationDeliveryManager {
           return {
             status: 'resolved' as const,
             result: {
-              success: false,
+              success: false as const,
               deliveryId,
               eventId: rawRecord.eventId,
               messageId: rawRecord.messageId,
               channel,
-              status: 'failed',
+              status: 'failed' as const,
               error: {
                 code: 'PERSISTENCE_FAILURE',
                 message: `Failed to acquire delivery claim: ${repoErr?.message}`,
@@ -681,12 +714,12 @@ export class NotificationDeliveryManager {
         }
         this.inFlightClaims.delete(deliveryId);
         return {
-          success: true,
+          success: true as const,
           deliveryId,
           eventId: rawRecord.eventId,
           messageId: lateCheck.id,
           channel,
-          status: 'already_delivered',
+          status: 'already_delivered' as const,
           deliveredAt: lateCheck.ts,
         };
       }
@@ -742,7 +775,7 @@ export class NotificationDeliveryManager {
       this.inFlightClaims.delete(deliveryId);
 
       return {
-        success: true,
+        success: true as const,
         deliveryId,
         eventId: rawRecord.eventId,
         messageId: rawRecord.messageId,
@@ -767,7 +800,7 @@ export class NotificationDeliveryManager {
       }
 
       return {
-        success: false,
+        success: false as const,
         deliveryId,
         eventId: rawRecord.eventId,
         messageId: rawRecord.messageId,

@@ -1,11 +1,10 @@
 import { toast } from "sonner";
 import { z } from "zod";
-import { auth } from "./firebase";
 import {
   K,
   getKey,
+  getCurrentStoreUser,
   isKeyForUid,
-  isAlphaKeyPrefix,
   ChatMessageSchema,
   NoteSchema,
   BillSchema,
@@ -43,7 +42,10 @@ const STORE_SCHEMAS: Record<string, z.ZodType<any>> = {
   // summary is unstructured string, no strict schema beyond string
 };
 
-const DB_NAME = "alpha.music.v1";
+function getDatabaseName(): string {
+  return `alpha.music.v1.${getCurrentStoreUser()}`;
+}
+const LEGACY_DB_NAME = "alpha.music.v1";
 const STORE = "tracks";
 
 export interface AlphaDataExport {
@@ -61,13 +63,13 @@ export interface AlphaDataExport {
   }>;
 }
 
-function openDb(): Promise<IDBDatabase> {
+function openDb(databaseName = getDatabaseName()): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
       reject(new Error("IndexedDB is not available in this browser."));
       return;
     }
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(databaseName, 1);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: "id" });
@@ -93,6 +95,57 @@ function dataUrlToBlob(dataUrl: string): Blob {
   const arr = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
   return new Blob([arr], { type: mime });
+}
+
+/**
+ * Copies tracks from the pre-account-scoping IndexedDB into the active
+ * account's library. The legacy database is retained as a recovery copy.
+ */
+export async function importLegacyMusicForCurrentUser(): Promise<number> {
+  const currentUid = getCurrentStoreUser();
+  if (currentUid === "unauthenticated") throw new Error("Sign in before importing legacy music.");
+
+  const legacyDb = await openDb(LEGACY_DB_NAME);
+  let legacyRows: any[] = [];
+  try {
+    legacyRows = await new Promise<any[]>((resolve, reject) => {
+      const tx = legacyDb.transaction(STORE, "readonly");
+      const request = tx.objectStore(STORE).getAll();
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error || new Error("Could not read legacy music."));
+      tx.oncomplete = () => legacyDb.close();
+      tx.onerror = () => reject(tx.error || new Error("Could not read legacy music."));
+    });
+  } catch (error) {
+    legacyDb.close();
+    throw error;
+  }
+  if (!legacyRows.length) return 0;
+
+  const accountDb = await openDb();
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      const tx = accountDb.transaction(STORE, "readwrite");
+      const store = tx.objectStore(STORE);
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const existingIds = new Set((request.result || []).map((row: any) => row.id));
+        let copied = 0;
+        for (const row of legacyRows) {
+          if (row && typeof row.id === "string" && row.blob && !existingIds.has(row.id)) {
+            store.put(row);
+            copied += 1;
+          }
+        }
+        tx.oncomplete = () => resolve(copied);
+      };
+      request.onerror = () => reject(request.error || new Error("Could not inspect account music."));
+      tx.onerror = () => reject(tx.error || new Error("Could not import legacy music."));
+      tx.onabort = () => reject(tx.error || new Error("Legacy music import was aborted."));
+    });
+  } finally {
+    accountDb.close();
+  }
 }
 
 export async function exportAlphaData(): Promise<AlphaDataExport> {
@@ -155,7 +208,7 @@ export async function exportAlphaData(): Promise<AlphaDataExport> {
   }
 
   const reminderRepo = reminderRepository;
-  const currentUid = auth.currentUser?.uid || "local-user";
+  const currentUid = getCurrentStoreUser();
   let exportedReminders: FirestoreReminder[] = [];
   try {
     exportedReminders = await reminderRepo.listReminders(currentUid);
@@ -179,6 +232,8 @@ export function downloadAlphaData(data: AlphaDataExport) {
 }
 
 export async function importAlphaData(fileOrJson: File | string): Promise<{ restored: string[] }> {
+  const currentUid = getCurrentStoreUser();
+  if (currentUid === "unauthenticated") throw new Error("Sign in before importing an Alpha backup.");
   const text = typeof fileOrJson === "string" ? fileOrJson : await fileOrJson.text();
   const data: AlphaDataExport = JSON.parse(text);
   if (!data || (data.version !== 1 && data.version !== 2)) {
@@ -278,7 +333,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
 
       stagedReminders.push({
         id: r.id,
-        userId: "local-user",
+        userId: currentUid,
         title: r.title,
         notes: r.notes,
         dueAt: r.dueAt,
@@ -319,7 +374,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
         }
         stagedReminders.push({
           id: lr.id || uid(),
-          userId: "local-user",
+          userId: currentUid,
           title: lr.title.trim(),
           notes: lr.notes || "",
           dueAt,
@@ -373,7 +428,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
   if (typeof window !== "undefined" && window.localStorage) {
     for (let i = 0; i < window.localStorage.length; i++) {
       const key = window.localStorage.key(i);
-      if (key && (isAlphaKeyPrefix(key) || isKeyForUid(key, "local-user"))) {
+      if (key && isKeyForUid(key, currentUid)) {
         const val = window.localStorage.getItem(key);
         if (val !== null) previousLocalStorage[key] = val;
       }
@@ -383,7 +438,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
   const reminderRepo = reminderRepository;
   let previousReminders: FirestoreReminder[];
   try {
-    previousReminders = await reminderRepo.listReminders("local-user");
+    previousReminders = await reminderRepo.listReminders(currentUid);
   } catch (snapshotErr) {
     throw new Error(
       `Import aborted: failed to snapshot existing reminders (${snapshotErr instanceof Error ? snapshotErr.message : String(snapshotErr)}). Existing data was not modified.`
@@ -419,7 +474,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
         const keysToRemove: string[] = [];
         for (let i = 0; i < window.localStorage.length; i++) {
           const key = window.localStorage.key(i);
-          if (key && (isAlphaKeyPrefix(key) || isKeyForUid(key, "local-user"))) {
+          if (key && isKeyForUid(key, currentUid)) {
             keysToRemove.push(key);
           }
         }
@@ -433,7 +488,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
       }
 
       // 3. Replace reminders in canonical LocalReminderRepository
-      await reminderRepo.replaceReminders("local-user", stagedReminders);
+      await reminderRepo.replaceReminders(currentUid, stagedReminders);
 
       // 4. Replace music tracks in IndexedDB (including empty music collection replacement)
       if (shouldReplaceMusic) {
@@ -463,7 +518,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
           const keysToRemove: string[] = [];
           for (let i = 0; i < window.localStorage.length; i++) {
             const key = window.localStorage.key(i);
-            if (key && (isAlphaKeyPrefix(key) || isKeyForUid(key, "local-user"))) {
+            if (key && isKeyForUid(key, currentUid)) {
               keysToRemove.push(key);
             }
           }
@@ -474,7 +529,7 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
             window.localStorage.setItem(key, val);
           }
         }
-        await reminderRepo.replaceReminders("local-user", previousReminders);
+        await reminderRepo.replaceReminders(currentUid, previousReminders);
         if (shouldReplaceMusic) {
           const db = await openDb();
           await new Promise<void>((resolve) => {
@@ -512,57 +567,68 @@ export async function importAlphaData(fileOrJson: File | string): Promise<{ rest
 }
 
 export async function wipeAlphaData() {
-  return await withCrossContextLock("alpha_global_wipe_lock", async () => {
-    const errors: string[] = [];
+  const currentUid = getCurrentStoreUser();
+  if (currentUid === "unauthenticated") throw new Error("Sign in before wiping account data.");
 
-    // 1. Clear localStorage keys
-    try {
-      const keysToRemove: string[] = [];
-      for (let i = 0; i < window.localStorage.length; i++) {
-        const key = window.localStorage.key(i);
-        if (key && (isAlphaKeyPrefix(key) || isKeyForUid(key, "local-user"))) {
-          keysToRemove.push(key);
+  const cloudSync = await import("./cloud-sync");
+  const reminderCloudSync = await import("./reminder-cloud-sync");
+  const notificationCloudSync = await import("./notification-cloud-sync");
+  cloudSync.pauseCloudSyncForAccount(currentUid);
+  reminderCloudSync.pauseReminderCloudSyncForAccount(currentUid);
+  notificationCloudSync.pauseNotificationCloudSyncForAccount(currentUid);
+  try {
+    // Remove cloud records first. If the cloud operation fails, local data is
+    // left intact so the user can retry without losing the only remaining copy.
+    await cloudSync.wipeAccountCloudData(currentUid);
+
+    return await withCrossContextLock(`alpha_account_wipe_lock.${currentUid}`, async () => {
+      const errors: string[] = [];
+
+      try {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const key = window.localStorage.key(i);
+          if (key && isKeyForUid(key, currentUid)) keysToRemove.push(key);
         }
+        for (const key of keysToRemove) window.localStorage.removeItem(key);
+      } catch (err: unknown) {
+        errors.push(`Failed to clear account local storage: ${err instanceof Error ? err.message : String(err)}`);
       }
-      for (const key of keysToRemove) {
-        window.localStorage.removeItem(key);
+
+      try {
+        await reminderRepository.replaceReminders(currentUid, []);
+      } catch (err: unknown) {
+        errors.push(`Failed to clear account reminders: ${err instanceof Error ? err.message : String(err)}`);
       }
-    } catch (err: unknown) {
-      errors.push(`Failed to clear local storage: ${err instanceof Error ? err.message : String(err)}`);
-    }
 
-    // 2. Clear canonical reminders
-    try {
-      const reminderRepo = reminderRepository;
-      await reminderRepo.replaceReminders("local-user", []);
-    } catch (err: unknown) {
-      errors.push(`Failed to clear canonical reminders: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    // 3. Clear IndexedDB music
-    try {
-      const db = await openDb();
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(STORE, "readwrite");
-        const store = tx.objectStore(STORE);
-        const req = store.clear();
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error || new Error("Could not clear music."));
-        tx.oncomplete = () => db.close();
-      });
-    } catch (err: unknown) {
-      errors.push(`Failed to clear music store: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    if (errors.length > 0) {
-      throw new Error(`Wipe operation failed:\n${errors.join("\n")}`);
-    }
-
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("alpha:reminders-changed"));
-      if (typeof window.location?.reload === "function") {
-        window.location.reload();
+      try {
+        const db = await openDb();
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction(STORE, "readwrite");
+          tx.objectStore(STORE).clear();
+          tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onerror = () => { db.close(); reject(tx.error || new Error("Could not clear music.")); };
+          tx.onabort = () => { db.close(); reject(tx.error || new Error("Music wipe was aborted.")); };
+        });
+      } catch (err: unknown) {
+        errors.push(`Failed to clear account music: ${err instanceof Error ? err.message : String(err)}`);
       }
-    }
-  });
+
+      const { alphaStore } = await import("./alpha-store");
+      alphaStore.reloadFromStorage();
+
+      if (errors.length > 0) {
+        throw new Error(`Account wipe was incomplete:\n${errors.join("\n")}`);
+      }
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("alpha:reminders-changed"));
+        if (typeof window.location?.reload === "function") window.location.reload();
+      }
+    });
+  } finally {
+    notificationCloudSync.resumeNotificationCloudSyncForAccount(currentUid);
+    reminderCloudSync.resumeReminderCloudSyncForAccount(currentUid);
+    cloudSync.resumeCloudSyncForAccount(currentUid);
+  }
 }

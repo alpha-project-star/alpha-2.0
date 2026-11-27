@@ -1,4 +1,5 @@
 import { MusicManager } from "./audio-subsystem/music-manager";
+import { getCurrentStoreUser } from "./alpha-store";
 
 export interface MusicTrackMeta {
   id: string;
@@ -8,7 +9,9 @@ export interface MusicTrackMeta {
   addedAt: number;
 }
 
-const DB_NAME = "alpha.music.v1";
+function getDatabaseName(): string {
+  return `alpha.music.v1.${getCurrentStoreUser()}`;
+}
 const STORE = "tracks";
 
 function openDb(): Promise<IDBDatabase> {
@@ -17,7 +20,7 @@ function openDb(): Promise<IDBDatabase> {
       reject(new Error("Music storage is not available in this browser."));
       return;
     }
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(getDatabaseName(), 1);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: "id" });

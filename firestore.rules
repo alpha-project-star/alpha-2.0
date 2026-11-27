@@ -1,85 +1,112 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Global helper: Is the user authenticated?
     function isSignedIn() {
       return request.auth != null;
     }
 
-    // Global helper: Is the document owner the current user?
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // Reminder/acknowledgement IDs contain deterministic colons, so allow
+    // those while still rejecting path separators and unbounded identifiers.
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string &&
+             id.size() > 0 &&
+             id.size() <= 128 &&
+             id.matches('^[a-zA-Z0-9_\\-:.]+$');
     }
 
-    // Validation helper for Memories
-    function isValidMemory(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.userId is string && data.userId.size() <= 128 &&
-             data.content is string && data.content.size() <= 10000 &&
-             data.createdAt is number;
+    function hasOwner(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.userId.size() <= 128;
     }
 
-    // Validation helper for Notes
-    function isValidNote(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.userId is string && data.userId.size() <= 128 &&
-             data.content is string && data.content.size() <= 20000 &&
-             data.createdAt is number;
+    function isValidMemory(data, userId) {
+      return hasOwner(data, userId) &&
+             data.content is string &&
+             data.content.size() > 0 &&
+             data.content.size() <= 10000 &&
+             data.createdAt is number &&
+             (!('updatedAt' in data) || data.updatedAt is number);
     }
 
-    // Validation helper for Tasks
-    function isValidTask(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.userId is string && data.userId.size() <= 128 &&
-             data.title is string && data.title.size() <= 1000 &&
-             data.createdAt is number;
+    function isValidNote(data, userId) {
+      return hasOwner(data, userId) &&
+             data.content is string &&
+             data.content.size() <= 20000 &&
+             data.createdAt is number &&
+             (!('updatedAt' in data) || data.updatedAt is number);
     }
 
-    // Validation helper for Bills
-    function isValidBill(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.userId is string && data.userId.size() <= 128 &&
-             data.description is string && data.description.size() <= 1000 &&
+    function isValidTask(data, userId) {
+      return hasOwner(data, userId) &&
+             data.title is string &&
+             data.title.size() > 0 &&
+             data.title.size() <= 1000 &&
+             data.createdAt is number &&
+             (!('updatedAt' in data) || data.updatedAt is number);
+    }
+
+    function isValidBill(data, userId) {
+      return hasOwner(data, userId) &&
+             data.description is string &&
+             data.description.size() > 0 &&
+             data.description.size() <= 1000 &&
              data.amount is number &&
-             data.createdAt is number;
+             data.createdAt is number &&
+             (!('updatedAt' in data) || data.updatedAt is number);
     }
 
-    // Validation helper for Goals
-    function isValidGoal(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.userId is string && data.userId.size() <= 128 &&
-             data.title is string && data.title.size() <= 1000 &&
-             data.createdAt is number;
+    function isValidGoal(data, userId) {
+      return hasOwner(data, userId) &&
+             data.title is string &&
+             data.title.size() > 0 &&
+             data.title.size() <= 1000 &&
+             data.createdAt is number &&
+             (!('updatedAt' in data) || data.updatedAt is number);
     }
 
-    // Validation helper for Reminders
-    function isValidReminder(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.title is string && data.title.size() <= 1000 &&
+    function isValidReminder(data, userId) {
+      return hasOwner(data, userId) &&
+             data.id is string &&
+             data.id.size() > 0 &&
+             data.id.size() <= 128 &&
+             data.title is string &&
+             data.title.size() <= 1000 &&
              data.dueAt is number &&
-             data.userId is string && data.userId.size() <= 128;
+             data.createdAt is number &&
+             data.updatedAt is number &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 5000)) &&
+             (!('reminderState' in data) ||
+               data.reminderState in ['active', 'completed', 'cancelled', 'passed', 'acknowledged']) &&
+             (!('notificationState' in data) ||
+               data.notificationState in ['pending', 'claimed', 'accepted', 'failed']);
     }
 
-    // Validation helper for Acknowledgements
-    function isValidAcknowledgement(data) {
-      return data.ackId is string &&
+    function isValidAcknowledgement(data, userId) {
+      return hasOwner(data, userId) &&
+             data.ackId is string &&
              data.eventId is string &&
              data.reminderId is string &&
-             data.userId is string &&
-             data.channel is string &&
+             data.channel in ['in_app', 'push', 'browser', 'tts'] &&
              data.status in ['pending', 'delivered', 'acknowledged', 'failed'] &&
              data.createdAt is number &&
-             data.updatedAt is number;
+             data.updatedAt is number &&
+             (!('deliveredAt' in data) || data.deliveredAt is number) &&
+             (!('acknowledgedAt' in data) || data.acknowledgedAt is number) &&
+             (!('userConfirmationText' in data) ||
+               (data.userConfirmationText is string && data.userConfirmationText.size() <= 2000)) &&
+             (!('title' in data) || (data.title is string && data.title.size() <= 1000)) &&
+             (!('dueAt' in data) || data.dueAt is number) &&
+             (!('version' in data) || data.version is number);
     }
 
-    // Validation helper for Notification Diagnostics
-    function isValidDiagnostic(data) {
-      return data.diagnosticId is string &&
-             data.userId is string &&
+    function isValidDiagnostic(data, userId) {
+      return hasOwner(data, userId) &&
+             data.diagnosticId is string &&
              data.correlationId is string &&
              data.stage is string &&
              data.action is string &&
@@ -87,87 +114,137 @@ service cloud.firestore {
              data.timestamp is number;
     }
 
-    // Default deny-all
-    match /{document=**} {
-      allow read, write: if false;
+    function isValidPushSubscription(data, userId, subscriptionId) {
+      return hasOwner(data, userId) &&
+             data.subscriptionId == subscriptionId &&
+             data.subscriptionId is string &&
+             data.subscriptionId.size() <= 128 &&
+             data.endpoint is string &&
+             data.endpoint.size() <= 2048 &&
+             data.endpoint.matches('^https://[^ ]+$') &&
+             data.keys is map &&
+             data.keys.p256dh is string &&
+             data.keys.p256dh.size() > 0 &&
+             data.keys.p256dh.size() <= 256 &&
+             data.keys.auth is string &&
+             data.keys.auth.size() > 0 &&
+             data.keys.auth.size() <= 256 &&
+             data.createdAt is number &&
+             data.updatedAt is number &&
+             (!('expirationTime' in data) ||
+               data.expirationTime == null || data.expirationTime is number) &&
+             (!('userAgent' in data) ||
+               (data.userAgent is string && data.userAgent.size() <= 500));
     }
 
-    // User-scoped Memories collection
     match /users/{userId}/memories/{memoryId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidId(memoryId) && isValidMemory(request.resource.data) && request.resource.data.userId == userId;
-      allow update: if isOwner(userId) && isValidId(memoryId) && isValidMemory(request.resource.data) && request.resource.data.userId == userId;
+      allow create, update: if isOwner(userId) &&
+        isValidId(memoryId) &&
+        isValidMemory(request.resource.data, userId);
       allow delete: if isOwner(userId) && isValidId(memoryId);
     }
 
-    // User-scoped Notes collection
     match /users/{userId}/notes/{noteId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidId(noteId) && isValidNote(request.resource.data) && request.resource.data.userId == userId;
-      allow update: if isOwner(userId) && isValidId(noteId) && isValidNote(request.resource.data) && request.resource.data.userId == userId;
+      allow create, update: if isOwner(userId) &&
+        isValidId(noteId) &&
+        isValidNote(request.resource.data, userId);
       allow delete: if isOwner(userId) && isValidId(noteId);
     }
 
-    // User-scoped Tasks collection
     match /users/{userId}/tasks/{taskId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidId(taskId) && isValidTask(request.resource.data) && request.resource.data.userId == userId;
-      allow update: if isOwner(userId) && isValidId(taskId) && isValidTask(request.resource.data) && request.resource.data.userId == userId;
+      allow create, update: if isOwner(userId) &&
+        isValidId(taskId) &&
+        isValidTask(request.resource.data, userId);
       allow delete: if isOwner(userId) && isValidId(taskId);
     }
 
-    // User-scoped Bills collection
     match /users/{userId}/bills/{billId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidId(billId) && isValidBill(request.resource.data) && request.resource.data.userId == userId;
-      allow update: if isOwner(userId) && isValidId(billId) && isValidBill(request.resource.data) && request.resource.data.userId == userId;
+      allow create, update: if isOwner(userId) &&
+        isValidId(billId) &&
+        isValidBill(request.resource.data, userId);
       allow delete: if isOwner(userId) && isValidId(billId);
     }
 
-    // User-scoped Goals collection
     match /users/{userId}/goals/{goalId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidId(goalId) && isValidGoal(request.resource.data) && request.resource.data.userId == userId;
-      allow update: if isOwner(userId) && isValidId(goalId) && isValidGoal(request.resource.data) && request.resource.data.userId == userId;
+      allow create, update: if isOwner(userId) &&
+        isValidId(goalId) &&
+        isValidGoal(request.resource.data, userId);
       allow delete: if isOwner(userId) && isValidId(goalId);
     }
 
-    // User-scoped Reminders collection
     match /users/{userId}/reminders/{reminderId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidId(reminderId) && isValidReminder(request.resource.data) && request.resource.data.userId == userId;
-      allow update: if isOwner(userId) && isValidId(reminderId) && isValidReminder(request.resource.data) &&
-                       request.resource.data.userId == userId &&
-                       !('workerId' in request.resource.data) &&
-                       !('claimedAt' in request.resource.data) &&
-                       !('acceptedAt' in request.resource.data) &&
-                       !('failedAt' in request.resource.data);
+      allow create, update: if isOwner(userId) &&
+        isValidId(reminderId) &&
+        isValidReminder(request.resource.data, userId) &&
+        !('workerId' in request.resource.data) &&
+        !('claimedAt' in request.resource.data) &&
+        !('acceptedAt' in request.resource.data) &&
+        !('failedAt' in request.resource.data);
       allow delete: if isOwner(userId) && isValidId(reminderId);
     }
 
-    // User-scoped Acknowledgements collection
     match /users/{userId}/acknowledgements/{ackId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidId(ackId) && isValidAcknowledgement(request.resource.data) && request.resource.data.userId == userId;
-      allow update: if isOwner(userId) && isValidId(ackId) && isValidAcknowledgement(request.resource.data) && request.resource.data.userId == userId;
+      allow create, update: if isOwner(userId) &&
+        isValidId(ackId) &&
+        isValidAcknowledgement(request.resource.data, userId);
       allow delete: if isOwner(userId) && isValidId(ackId);
     }
 
-    // User-scoped Notification Diagnostics collection
     match /users/{userId}/notificationDiagnostics/{diagnosticId} {
       allow read: if isOwner(userId);
-      allow create, update: if isOwner(userId) && isValidId(diagnosticId) && isValidDiagnostic(request.resource.data) && request.resource.data.userId == userId;
+      allow create, update: if isOwner(userId) &&
+        isValidId(diagnosticId) &&
+        isValidDiagnostic(request.resource.data, userId);
       allow delete: if isOwner(userId) && isValidId(diagnosticId);
     }
 
-    // User-scoped Push Subscriptions collection
     match /users/{userId}/pushSubscriptions/{subscriptionId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) &&
+        isValidId(subscriptionId) &&
+        isValidPushSubscription(request.resource.data, userId, subscriptionId);
+      allow delete: if isOwner(userId) && isValidId(subscriptionId);
+    }
+
+    // Client-owned delivery history is synchronized across the user's devices.
+    match /users/{userId}/notificationDeliveries/{deliveryId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) &&
+        isValidId(deliveryId) &&
+        hasOwner(request.resource.data, userId) &&
+        request.resource.data.deliveryId == deliveryId &&
+        request.resource.data.eventId is string &&
+        request.resource.data.reminderId is string &&
+        request.resource.data.messageId is string &&
+        request.resource.data.channel is string &&
+        request.resource.data.status in ['pending', 'delivering', 'delivered', 'failed'] &&
+        request.resource.data.createdAt is number &&
+        request.resource.data.updatedAt is number &&
+        request.resource.data.retryCount is number;
+      allow delete: if isOwner(userId) && isValidId(deliveryId);
+    }
+
+    match /users/{userId}/migration/state {
       allow read, write: if isOwner(userId);
     }
 
-    // Migration state
-    match /users/{userId}/migration/state {
-      allow read, write: if isOwner(userId);
+    // Server-owned push delivery claims/results cannot be forged by clients.
+    // The owner may read and delete their own markers so account wipe can clean them.
+    match /users/{userId}/pushDeliveries/{deliveryId} {
+      allow read: if isOwner(userId);
+      allow create, update: if false;
+      allow delete: if isOwner(userId) && isValidId(deliveryId);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

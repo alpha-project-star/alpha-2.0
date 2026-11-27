@@ -15,6 +15,9 @@ export interface ParsedDocument {
 }
 
 const MAX_DOC_CHARS = 100000;
+// Bound memory use before reading the entire file into an ArrayBuffer.
+export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+const PDF_PAGE_LIMIT_NOTICE = "[... PDF extraction limited to the first 50 pages ...]";
 
 export async function parseUploadedFile(file: File): Promise<ParsedDocument> {
   activity.set("reading_file");
@@ -25,6 +28,9 @@ export async function parseUploadedFile(file: File): Promise<ParsedDocument> {
     : "";
 
   try {
+    if (!Number.isFinite(file.size) || file.size < 0 || file.size > MAX_UPLOAD_BYTES) {
+      throw new RangeError(`File exceeds Alpha's 20 MB upload limit.`);
+    }
     let extractedText = "";
 
     if (ext === ".pdf") {
@@ -55,8 +61,9 @@ export async function parseUploadedFile(file: File): Promise<ParsedDocument> {
     }
 
     const clean = sanitizeExtractedText(extractedText);
-    const truncated = clean.length > MAX_DOC_CHARS;
-    const finalContent = truncated
+    const exceedsCharacterLimit = clean.length > MAX_DOC_CHARS;
+    const truncated = exceedsCharacterLimit || clean.includes(PDF_PAGE_LIMIT_NOTICE);
+    const finalContent = exceedsCharacterLimit
       ? clean.slice(0, MAX_DOC_CHARS) + `\n\n[... Truncated: File content exceeded ${MAX_DOC_CHARS} characters]`
       : clean;
 
@@ -387,6 +394,7 @@ async function extractPdfText(file: File): Promise<string> {
       fullText += `--- Page ${pageNum} ---\n` + pageStrings.join(" ") + "\n\n";
     }
 
+    if (pdfDoc.numPages > numPages) fullText += `\n\n${PDF_PAGE_LIMIT_NOTICE}`;
     return fullText;
   } catch (err: any) {
     console.warn("[FileParser] PDFjs extraction failed, trying binary stream heuristic:", err);

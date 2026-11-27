@@ -35,8 +35,14 @@ cp .env.example .env
 
 | Variable   | Purpose                                                                           |
 | ---------- | --------------------------------------------------------------------------------- |
-| `NODE_ENV` | `development` or `production`                                                     |
-| `VITE_*`   | Any public value you want to expose to the browser (not used by Alpha by default) |
+| `NODE_ENV` | `development` or `production` |
+| `VITE_VAPID_PUBLIC_KEY` | Public Web Push application-server key used by the browser |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Server-only Web Push signing configuration |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | Server-only service-account JSON used by the scheduled push worker |
+| `FIREBASE_PROJECT_ID` | Optional project ID override (defaults to the service account project) |
+| `FIRESTORE_DATABASE_ID` | Exact Firestore database ID used by the Firebase app |
+| `ALPHA_CRON_SECRET` | At least 32 random characters; protects the scheduled push endpoint |
+| `VITE_*` | Values prefixed with `VITE_` are public and must never contain secrets |
 
 ## API keys you need
 
@@ -71,11 +77,12 @@ This produces a TanStack Start production bundle. You can preview it locally:
 bun run preview
 ```
 
-## PWA install
+## PWA install and offline behavior
 
-- Open the app in Chrome/Edge.
+- Open the production app in Chrome/Edge.
 - Tap the **install icon** in the address bar or use **Add to Home Screen** on Android.
-- The PWA works offline if you have configured Ollama and local services.
+- The service worker caches the application shell and same-origin static assets. After the first successful online load, Alpha can reopen to its cached shell when offline.
+- Offline mode does not make remote AI providers, Firebase cloud sync, or server routes available. Local browser data remains available; local Ollama/TTS/STT services work only if the device can reach those services.
 
 ## Exporting / importing your Alpha data
 
@@ -86,14 +93,29 @@ All your data (chat history, notes, reminders, memories, settings, and uploaded 
 3. On the new device, open Alpha and tap **Import Alpha data**.
 4. Select the backup file.
 
+## Cross-device reminders and scheduled push
+
+Authenticated users' reminders, acknowledgement records, and notification-delivery history are mirrored to their UID-scoped Firestore collections. Local writes remain usable when offline and are reconciled when a server-backed Firestore snapshot becomes available. Cloud sync requires the configured Firebase project and deployed Firestore rules.
+
+Background push delivery runs on the server, not in the browser. To enable it:
+
+1. Configure a Web Push VAPID key pair. Set the public key as `VITE_VAPID_PUBLIC_KEY` at build time, and set the matching `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` as server-only runtime variables.
+2. Set `FIREBASE_SERVICE_ACCOUNT_JSON` to a service-account JSON value, and set `FIRESTORE_DATABASE_ID` to the exact database ID in `firebase-applet-config.json`. The service account needs Firestore read/write access to user reminder, push-subscription, and server-owned push-delivery documents. Never commit this JSON or any private key.
+3. Set a strong `ALPHA_CRON_SECRET` (at least 32 random characters) in the server environment.
+4. In GitHub repository settings, add the repository variable `ALPHA_BASE_URL` (the deployed app origin, without a trailing slash) and the repository secret `ALPHA_CRON_SECRET` with the same value as the server secret.
+5. The `Scheduled push delivery` GitHub Actions workflow calls `POST /api/push/cron` every five minutes. You can also invoke it from a trusted scheduler using `Authorization: Bearer <ALPHA_CRON_SECRET>`.
+
+Users must sign in, grant browser notification permission, and enable **Background push** in Settings on each device. The server sends a generic reminder notification and does not include reminder notes. A successful subscription does not prove that the host's cron workflow or server credentials are configured; verify the scheduled workflow and a real device delivery after deployment.
+
 ## Moving from Lovable to your own host
 
-To deploy Alpha outside Lovable:
+Alpha uses TanStack Start with Nitro; it must be deployed as a full-stack app, not as a static-only export.
 
-1. Push the code to a GitHub repository (Lovable → Plus menu → GitHub).
-2. Connect the repo to your host of choice (Vercel, Netlify, Cloudflare Pages, etc.).
-3. Set the build command to `bun run build` and output directory to `dist` (or `.output` depending on your host).
-4. No backend database is required — Alpha is fully client-side except for the external AI APIs.
+- **Vercel:** `vercel.json` selects the TanStack Start framework. Nitro detects Vercel during the build and emits Vercel Functions for server routes. Do not override the build output directory with `.output/public`.
+- **Node.js hosts:** Build with `npm run build` (or `bun run build`) and start the generated server with `npm run start` (or `bun run start`), which runs `.output/server/index.mjs`.
+- Configure the server-only environment variables above on the host. The scheduled GitHub Actions workflow also needs the repository variable `ALPHA_BASE_URL` and secret `ALPHA_CRON_SECRET`.
+
+A static hosting target that serves only `.output/public` cannot run the scheduled push endpoint or other server routes.
 
 ## Project structure
 

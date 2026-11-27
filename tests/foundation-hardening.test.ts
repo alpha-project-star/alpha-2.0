@@ -3,7 +3,7 @@ import { LocalReminderRepository, InMemoryReminderRepository } from "../src/lib/
 import { executeActionTagsAsync } from "../src/lib/actions";
 import { activity } from "../src/lib/activity";
 import { fireAlarm } from "../src/lib/alarm-engine";
-import { alphaStore, PersistenceError } from "../src/lib/alpha-store";
+import { alphaStore, PersistenceError, setStoreUser } from "../src/lib/alpha-store";
 import { restoreAlphaData, importAlphaData } from "../src/lib/data-portability";
 import * as voiceModule from "../src/lib/voice";
 
@@ -71,7 +71,7 @@ describe("Foundation Hardening - Workstreams Verification", () => {
       expect(retrieved?.reminderState).toBe("active");
 
       // Verify it's persisted in local storage
-      const persistedRaw = storeMap.get("alpha.reminders.v1");
+      const persistedRaw = storeMap.get("alpha.reminders.v1.local-user");
       expect(persistedRaw).toBeDefined();
       expect(persistedRaw).toContain("Buy groceries");
 
@@ -101,7 +101,7 @@ describe("Foundation Hardening - Workstreams Verification", () => {
     it("valid canonical reminder loads successfully", async () => {
       const repo = new LocalReminderRepository();
       storeMap.set(
-        "alpha.reminders.v1",
+        "alpha.reminders.v1.local-user",
         JSON.stringify([
           {
             id: "rem-1",
@@ -124,7 +124,7 @@ describe("Foundation Hardening - Workstreams Verification", () => {
     it("missing createdAt fails with PersistenceError", async () => {
       const repo = new LocalReminderRepository();
       storeMap.set(
-        "alpha.reminders.v1",
+        "alpha.reminders.v1.local-user",
         JSON.stringify([
           {
             id: "rem-1",
@@ -144,7 +144,7 @@ describe("Foundation Hardening - Workstreams Verification", () => {
     it("missing updatedAt fails with PersistenceError", async () => {
       const repo = new LocalReminderRepository();
       storeMap.set(
-        "alpha.reminders.v1",
+        "alpha.reminders.v1.local-user",
         JSON.stringify([
           {
             id: "rem-1",
@@ -164,7 +164,7 @@ describe("Foundation Hardening - Workstreams Verification", () => {
     it("missing notes fails if required by canonical type", async () => {
       const repo = new LocalReminderRepository();
       storeMap.set(
-        "alpha.reminders.v1",
+        "alpha.reminders.v1.local-user",
         JSON.stringify([
           {
             id: "rem-1",
@@ -184,7 +184,7 @@ describe("Foundation Hardening - Workstreams Verification", () => {
     it("invalid dueAt fails with PersistenceError", async () => {
       const repo = new LocalReminderRepository();
       storeMap.set(
-        "alpha.reminders.v1",
+        "alpha.reminders.v1.local-user",
         JSON.stringify([
           {
             id: "rem-1",
@@ -205,7 +205,7 @@ describe("Foundation Hardening - Workstreams Verification", () => {
     it("invalid reminderState fails with PersistenceError", async () => {
       const repo = new LocalReminderRepository();
       storeMap.set(
-        "alpha.reminders.v1",
+        "alpha.reminders.v1.local-user",
         JSON.stringify([
           {
             id: "rem-1",
@@ -226,7 +226,7 @@ describe("Foundation Hardening - Workstreams Verification", () => {
     it("invalid notificationState fails with PersistenceError", async () => {
       const repo = new LocalReminderRepository();
       storeMap.set(
-        "alpha.reminders.v1",
+        "alpha.reminders.v1.local-user",
         JSON.stringify([
           {
             id: "rem-1",
@@ -247,7 +247,7 @@ describe("Foundation Hardening - Workstreams Verification", () => {
     it("duplicate reminder IDs fail with PersistenceError", async () => {
       const repo = new LocalReminderRepository();
       storeMap.set(
-        "alpha.reminders.v1",
+        "alpha.reminders.v1.local-user",
         JSON.stringify([
           {
             id: "rem-dup",
@@ -278,7 +278,7 @@ describe("Foundation Hardening - Workstreams Verification", () => {
 
     it("malformed persisted data does not become an empty reminder collection", async () => {
       const repo = new LocalReminderRepository();
-      storeMap.set("alpha.reminders.v1", "{ corrupted json syntax");
+      storeMap.set("alpha.reminders.v1.local-user", "{ corrupted json syntax");
       await expect(repo.listReminders("local-user")).rejects.toThrow(PersistenceError);
     });
 
@@ -425,7 +425,7 @@ describe("Foundation Hardening - Workstreams Verification", () => {
   });
 
   describe("Workstream 8: Persistence Truthfulness (Persist Before Commit)", () => {
-    it("fails cleanly and does not mutate in-memory notes if storage write throws", () => {
+    it("fails cleanly and does not mutate in-memory notes if storage write throws", async () => {
       const initialNotesCount = alphaStore.get().notes.length;
 
       // Make storage throw on setItem
@@ -433,37 +433,33 @@ describe("Foundation Hardening - Workstreams Verification", () => {
         throw new Error("Disk full / Quota exceeded");
       });
 
-      expect(() => {
-        alphaStore.upsertNote({
-          id: "note-fail-test",
-          title: "Important note",
-          body: "Should not be persisted or retained in memory",
-          updatedAt: Date.now(),
-        });
-      }).toThrow(PersistenceError);
+      await expect(alphaStore.upsertNote({
+        id: "note-fail-test",
+        title: "Important note",
+        body: "Should not be persisted or retained in memory",
+        updatedAt: Date.now(),
+      })).rejects.toThrow(PersistenceError);
 
       // Verify in-memory state was NOT mutated
       expect(alphaStore.get().notes.length).toBe(initialNotesCount);
       expect(alphaStore.get().notes.some((n) => n.id === "note-fail-test")).toBe(false);
     });
 
-    it("fails cleanly and does not mutate in-memory bills if storage write throws", () => {
+    it("fails cleanly and does not mutate in-memory bills if storage write throws", async () => {
       const initialBillsCount = alphaStore.get().bills.length;
 
       (globalThis as any).window.localStorage.setItem = vi.fn(() => {
         throw new Error("Quota exceeded");
       });
 
-      expect(() => {
-        alphaStore.upsertBill({
-          id: "bill-fail-test",
-          name: "Water Bill",
-          amount: 50,
-          dueDate: "2026-10-01",
-          balance: 50,
-          status: "due",
-        });
-      }).toThrow(PersistenceError);
+      await expect(alphaStore.upsertBill({
+        id: "bill-fail-test",
+        name: "Water Bill",
+        amount: 50,
+        dueDate: "2026-10-01",
+        balance: 50,
+        status: "due",
+      })).rejects.toThrow(PersistenceError);
 
       expect(alphaStore.get().bills.length).toBe(initialBillsCount);
       expect(alphaStore.get().bills.some((b) => b.id === "bill-fail-test")).toBe(false);
@@ -474,6 +470,7 @@ describe("Foundation Hardening - Workstreams Verification", () => {
     it("rejects reminder import when duplicate reminder IDs are present in the import payload", async () => {
       const now = Date.now();
       const currentUid = "local-user";
+      setStoreUser(currentUid);
       const backupData = {
         version: 2,
         exportedAt: new Date().toISOString(),

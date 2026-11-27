@@ -67,7 +67,7 @@ export class ReminderTool {
       const validated = CreateReminderSchema.safeParse(input);
       
       if (!validated.success) {
-        return this.fail('INVALID_INPUT', validated.error.errors[0].message, op);
+        return this.fail('INVALID_INPUT', validated.error.issues[0].message, op);
       }
 
       const { title, dueAt: rawDue, notes } = validated.data;
@@ -164,7 +164,7 @@ export class ReminderTool {
       const validated = UpdateReminderSchema.safeParse(input);
       
       if (!validated.success) {
-        return this.fail('INVALID_INPUT', validated.error.errors[0].message, op);
+        return this.fail('INVALID_INPUT', validated.error.issues[0].message, op);
       }
 
       const activeCtx = reminderContextManager.getContext(userId);
