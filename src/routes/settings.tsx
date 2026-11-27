@@ -857,30 +857,30 @@ function SettingsRoute() {
                 <button
                   type="button"
                   onClick={async () => {
-                    const effectiveUid = auth.status === "authenticated" ? auth.user.uid : "local-user";
+                    if (auth.status !== "authenticated") {
+                      setAlarmStatus("⚠️ Sign in before enabling background push.");
+                      return;
+                    }
                     if (!isPushSupported()) {
                       setAlarmStatus("⚠️ Push notifications are not supported in this browser.");
                       toast.error("Push notifications not supported");
                       return;
                     }
                     const vapidKey = (import.meta.env.VITE_VAPID_PUBLIC_KEY || "") as string;
-                    if (!vapidKey) {
-                      // Fallback test key if none configured in env
-                      const defaultKey = "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U";
-                      const res = await registerPushSubscription(effectiveUid, defaultKey);
-                      if (res.success) {
-                        setAlarmStatus("✅ Background push registered successfully.");
-                        toast.success("Background push notifications enabled");
-                      } else {
-                        setAlarmStatus(`⚠️ Push registration failed: ${res.error?.message || "unknown"}`);
-                        toast.error(res.error?.message || "Push registration failed");
-                      }
+                    if (!vapidKey.trim()) {
+                      setAlarmStatus("⚠️ Background push is not configured: the public VAPID key is missing.");
                       return;
                     }
-                    const res = await registerPushSubscription(effectiveUid, vapidKey);
+                    const permission = await requestBrowserNotificationPermission();
+                    setPermRefresh((prev) => prev + 1);
+                    if (permission.state !== "granted") {
+                      setAlarmStatus("⚠️ Allow browser notifications before enabling background push.");
+                      return;
+                    }
+                    const res = await registerPushSubscription(auth.user.uid, vapidKey.trim());
                     if (res.success) {
-                      setAlarmStatus("✅ Background push registered successfully.");
-                      toast.success("Background push notifications enabled");
+                      setAlarmStatus("✅ Push subscription saved. Scheduled server delivery must also be configured by the app host.");
+                      toast.success("Background push subscription enabled");
                     } else {
                       setAlarmStatus(`⚠️ Push registration failed: ${res.error?.message || "unknown"}`);
                       toast.error(res.error?.message || "Push registration failed");
@@ -893,8 +893,11 @@ function SettingsRoute() {
                 <button
                   type="button"
                   onClick={async () => {
-                    const effectiveUid = auth.status === "authenticated" ? auth.user.uid : "local-user";
-                    const res = await unregisterPushSubscription(effectiveUid);
+                    if (auth.status !== "authenticated") {
+                      setAlarmStatus("⚠️ Sign in to manage this device's push subscription.");
+                      return;
+                    }
+                    const res = await unregisterPushSubscription(auth.user.uid);
                     if (res.success) {
                       setAlarmStatus("✅ Background push unregistered.");
                       toast.success("Background push unregistered");
