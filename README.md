@@ -109,7 +109,13 @@ Users must sign in, grant browser notification permission, and enable **Backgrou
 
 ## Moving from Lovable to your own host
 
-Alpha uses a TanStack Start Node server, not a static-only export. Build with `npm run build` (or `bun run build`) and run the generated server with `npm run start` (or `bun run start`). Choose a host that supports the generated Node server and configure the server-only environment variables above. A static hosting target that serves only `.output/public` cannot run the scheduled push endpoint or server routes.
+Alpha uses TanStack Start with Nitro; it must be deployed as a full-stack app, not as a static-only export.
+
+- **Vercel:** `vercel.json` selects the TanStack Start framework. Nitro detects Vercel during the build and emits Vercel Functions for server routes. Do not override the build output directory with `.output/public`.
+- **Node.js hosts:** Build with `npm run build` (or `bun run build`) and start the generated server with `npm run start` (or `bun run start`), which runs `.output/server/index.mjs`.
+- Configure the server-only environment variables above on the host. The scheduled GitHub Actions workflow also needs the repository variable `ALPHA_BASE_URL` and secret `ALPHA_CRON_SECRET`.
+
+A static hosting target that serves only `.output/public` cannot run the scheduled push endpoint or other server routes.
 
 ## Project structure
 
