@@ -38,7 +38,7 @@ jobs:
           java-version: "21"
 
       - name: Firestore security rules (emulator)
-        run: npx --yes firebase-tools emulators:exec --only firestore,auth --project demo-alpha-firestore-rules --non-interactive "node scripts/firestore-rules.test.mjs"
+        run: npx --yes firebase-tools emulators:exec --only firestore,auth --project demo-alpha-firestore-rules --non-interactive "node scripts/firestore-rules-emulator-check.mjs"
 
       - name: TypeScript
         run: npm run typecheck
