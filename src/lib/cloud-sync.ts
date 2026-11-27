@@ -129,7 +129,8 @@ export async function deleteDocFromCloud(
   id: string
 ): Promise<boolean> {
   const user = auth.currentUser;
-  if (!user || !user.uid || !id || getCurrentStoreUser() !== user.uid) return false;
+  if (!user || !user.uid || !id || getCurrentStoreUser() !== user.uid ||
+      pausedCloudSyncUids.has(user.uid)) return false;
 
   const uid = user.uid;
   const path = `users/${uid}/${collectionName}/${id}`;
