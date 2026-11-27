@@ -37,11 +37,8 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Install Firestore rules test tooling
-        run: npm install --no-save --package-lock=false firebase-tools @firebase/rules-unit-testing
-
       - name: Firestore security rules (emulator)
-        run: npx firebase emulators:exec --only firestore --project demo-alpha-firestore-rules --non-interactive "node scripts/firestore-rules.test.mjs"
+        run: npx --yes firebase-tools emulators:exec --only firestore,auth --project demo-alpha-firestore-rules --non-interactive "node scripts/firestore-rules.test.mjs"
 
       - name: TypeScript
         run: npm run typecheck
