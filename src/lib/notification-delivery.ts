@@ -7,6 +7,7 @@ import { notificationAcknowledgementManager } from './notification-acknowledgeme
 import { notificationChannelRegistry } from './notification-channel-registry';
 import { withCrossContextLock } from './cross-context-lock';
 import { alphaGate } from './alpha-gate';
+import { syncDeliveryToCloud } from './notification-cloud-sync';
 
 export type NotificationChannel = 'in_app' | string;
 
@@ -182,6 +183,7 @@ export class LocalDeliveryRepository implements DeliveryRepository {
     const storage = getStorage();
     if (!storage) {
       this.inMemoryFallback.set(`${userId}:${delivery.deliveryId}`, { ...delivery });
+      void syncDeliveryToCloud(userId, delivery);
       return;
     }
     await withCrossContextLock(`alpha_delivery_repo_${userId}`, async () => {
@@ -201,6 +203,7 @@ export class LocalDeliveryRepository implements DeliveryRepository {
         list.push({ ...delivery });
       }
       storage.setItem(key, JSON.stringify(list));
+      void syncDeliveryToCloud(userId, delivery);
     });
   }
 
@@ -211,6 +214,7 @@ export class LocalDeliveryRepository implements DeliveryRepository {
       if (!item) throw new Error(`Delivery record not found: ${deliveryId}`);
       const updated = { ...item, ...patch, userId, updatedAt: Date.now() };
       this.inMemoryFallback.set(`${userId}:${deliveryId}`, updated);
+      void syncDeliveryToCloud(userId, updated);
       return;
     }
     await withCrossContextLock(`alpha_delivery_repo_${userId}`, async () => {
@@ -227,6 +231,7 @@ export class LocalDeliveryRepository implements DeliveryRepository {
       if (idx < 0) throw new Error(`Delivery record not found: ${deliveryId}`);
       list[idx] = { ...list[idx], ...patch, userId, updatedAt: Date.now() };
       storage.setItem(key, JSON.stringify(list));
+      void syncDeliveryToCloud(userId, list[idx]);
     });
   }
 
@@ -246,6 +251,21 @@ export class LocalDeliveryRepository implements DeliveryRepository {
       return Array.isArray(parsed) ? parsed.filter((record: DeliveryRecord) => record.userId === userId) : [];
     } catch {
       return [];
+    }
+  }
+
+  async replaceAllFromCloud(userId: string, records: DeliveryRecord[]): Promise<void> {
+    const valid = records.filter((record) => record.userId === userId);
+    const storage = getStorage();
+    if (storage) {
+      storage.setItem(this.getStorageKey(userId), JSON.stringify(valid));
+    } else {
+      for (const key of this.inMemoryFallback.keys()) {
+        if (key.startsWith(`${userId}:`)) this.inMemoryFallback.delete(key);
+      }
+      for (const record of valid) {
+        this.inMemoryFallback.set(`${userId}:${record.deliveryId}`, { ...record });
+      }
     }
   }
 
