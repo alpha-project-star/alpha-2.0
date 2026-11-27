@@ -5,6 +5,16 @@ import { getCurrentStoreUser } from "./alpha-store";
 import type { AcknowledgementRecord, AcknowledgementRepository } from "./notification-acknowledgement";
 import type { DeliveryRecord, DeliveryRepository } from "./notification-delivery";
 
+const pausedAccounts = new Set<string>();
+
+export function pauseNotificationCloudSyncForAccount(userId: string): void {
+  if (userId) pausedAccounts.add(userId);
+}
+
+export function resumeNotificationCloudSyncForAccount(userId: string): void {
+  pausedAccounts.delete(userId);
+}
+
 type ReplaceableAcknowledgements = AcknowledgementRepository & {
   replaceAllFromCloud?: (userId: string, records: AcknowledgementRecord[]) => Promise<void>;
 };
@@ -17,7 +27,8 @@ function updatedAt(record: { updatedAt: number; createdAt?: number }): number {
 }
 
 export async function syncAcknowledgementToCloud(userId: string, record: AcknowledgementRecord): Promise<void> {
-  if (auth.currentUser?.uid !== userId || getCurrentStoreUser() !== userId || record.userId !== userId) return;
+  if (auth.currentUser?.uid !== userId || getCurrentStoreUser() !== userId ||
+      record.userId !== userId || pausedAccounts.has(userId)) return;
   try {
     await setDoc(doc(db, "users", userId, "acknowledgements", record.ackId), record, { merge: true });
   } catch (error) {
@@ -91,7 +102,7 @@ export function initNotificationCloudSync(
 
     unsubscribeAck = onSnapshot(collection(db, "users", uid, "acknowledgements"), (snapshot) => {
       if (currentGeneration !== generation || getCurrentStoreUser() !== uid ||
-          auth.currentUser?.uid !== uid || snapshot.metadata.fromCache) return;
+          auth.currentUser?.uid !== uid || pausedAccounts.has(uid) || snapshot.metadata.fromCache) return;
       void (async () => {
         const remote = snapshot.docs.map((item) => ({ ...item.data(), ackId: item.id }))
           .filter((item) => item.userId === uid) as unknown as AcknowledgementRecord[];
