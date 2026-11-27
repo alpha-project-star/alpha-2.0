@@ -21,6 +21,9 @@ import { AuthProvider, useAuth } from "../lib/auth";
 import { LocalReminderRepository, reminderRepository } from "../lib/reminder-repo";
 import { initCloudSync } from "../lib/cloud-sync";
 import { initReminderCloudSync } from "../lib/reminder-cloud-sync";
+import { initNotificationCloudSync } from "../lib/notification-cloud-sync";
+import { notificationAcknowledgementManager } from "../lib/notification-acknowledgement";
+import { notificationDelivery } from "../lib/notification-delivery";
 
 function NotFoundComponent() {
   return (
@@ -142,7 +145,13 @@ function AppContent() {
   useEffect(() => {
     const stopCloudSync = initCloudSync();
     const stopReminderSync = initReminderCloudSync(reminderRepository);
+    const deliveryRepository = notificationDelivery.getRepository();
+    const stopNotificationSync = initNotificationCloudSync(
+      notificationAcknowledgementManager.getRepository(),
+      deliveryRepository,
+    );
     return () => {
+      stopNotificationSync();
       stopReminderSync();
       stopCloudSync();
     };
