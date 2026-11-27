@@ -55,6 +55,7 @@ export function initNotificationCloudSync(
 
   let unsubscribeAck: (() => void) | undefined;
   let unsubscribeDelivery: (() => void) | undefined;
+  let unsubscribePushDelivery: (() => void) | undefined;
   let generation = 0;
 
   const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
@@ -62,8 +63,10 @@ export function initNotificationCloudSync(
     const currentGeneration = generation;
     unsubscribeAck?.();
     unsubscribeDelivery?.();
+    unsubscribePushDelivery?.();
     unsubscribeAck = undefined;
     unsubscribeDelivery = undefined;
+    unsubscribePushDelivery = undefined;
     if (!user?.uid) return;
 
     const uid = user.uid;
@@ -127,6 +130,53 @@ export function initNotificationCloudSync(
           }, (record) => syncDeliveryToCloud(uid, record));
         })().catch((error) => console.error("[NotificationCloudSync] Delivery merge failed:", error));
       }, (error) => console.warn("[NotificationCloudSync] Delivery listener failed:", error));
+
+      // Server-owned push markers are owner-readable but client-unwritable.
+      // Mirror their state into the same local delivery history, then into the
+      // user-writable notificationDeliveries collection for cross-device views.
+      unsubscribePushDelivery = onSnapshot(collection(db, "users", uid, "pushDeliveries"), (snapshot) => {
+        if (currentGeneration !== generation || getCurrentStoreUser() !== uid ||
+            auth.currentUser?.uid !== uid || pausedAccounts.has(uid) || snapshot.metadata.fromCache) return;
+        void (async () => {
+          const pushRecords: DeliveryRecord[] = snapshot.docs.flatMap((item) => {
+            const data = item.data();
+            if (data.userId !== uid || typeof data.eventId !== "string" ||
+                typeof data.reminderId !== "string" || typeof data.subscriptionId !== "string") return [];
+            const createdAt = typeof data.createdAt === "number" ? data.createdAt : Date.now();
+            const updatedAtValue = typeof data.updatedAt === "number" ? data.updatedAt : createdAt;
+            const status: DeliveryRecord["status"] = data.status === "sent"
+              ? "delivered"
+              : data.status === "processing"
+                ? "delivering"
+                : "failed";
+            return [{
+              deliveryId: `push_${item.id}`,
+              eventId: data.eventId,
+              reminderId: data.reminderId,
+              userId: uid,
+              messageId: `push:${data.eventId}`,
+              channel: "push",
+              status,
+              createdAt,
+              updatedAt: updatedAtValue,
+              ...(status === "delivered" ? { deliveredAt: updatedAtValue } : {}),
+              retryCount: Math.max(0, Number(data.attempts || 0) - 1),
+              ...(typeof data.error === "string" ? { error: data.error.slice(0, 500) } : {}),
+            }];
+          });
+
+          const local = await deliveries.listDeliveries(uid);
+          for (const record of pushRecords) {
+            const existing = local.find((item) => item.deliveryId === record.deliveryId);
+            if (!existing || updatedAt(record) > updatedAt(existing)) {
+              void syncDeliveryToCloud(uid, record);
+            }
+          }
+          await reconcile(pushRecords, local, async (records) => {
+            await deliveries.replaceAllFromCloud?.(uid, records);
+          }, (record) => syncDeliveryToCloud(uid, record));
+        })().catch((error) => console.error("[NotificationCloudSync] Push delivery merge failed:", error));
+      }, (error) => console.warn("[NotificationCloudSync] Push delivery listener failed:", error));
     }
   });
 
@@ -135,5 +185,6 @@ export function initNotificationCloudSync(
     unsubscribeAuth();
     unsubscribeAck?.();
     unsubscribeDelivery?.();
+    unsubscribePushDelivery?.();
   };
 }
