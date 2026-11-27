@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+  # Run once when this workflow is changed on main so release configuration
+  # problems are surfaced immediately instead of waiting for the next schedule.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/push-cron.yml"
 
 permissions:
   contents: read
@@ -15,21 +21,55 @@ concurrency:
 jobs:
   deliver:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
-      - name: Deliver due reminders
+      - name: Validate deployment configuration
+        id: config
         env:
           ALPHA_BASE_URL: ${{ vars.ALPHA_BASE_URL }}
           ALPHA_CRON_SECRET: ${{ secrets.ALPHA_CRON_SECRET }}
+        shell: bash
         run: |
           set -euo pipefail
           if [[ -z "${ALPHA_BASE_URL}" || -z "${ALPHA_CRON_SECRET}" ]]; then
-            echo "::warning::Set repository variable ALPHA_BASE_URL and secret ALPHA_CRON_SECRET to enable scheduled push delivery."
+            if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" || "${GITHUB_EVENT_NAME}" == "push" ]]; then
+              echo "::error::Configure repository variable ALPHA_BASE_URL and secret ALPHA_CRON_SECRET before manually testing or releasing scheduled push delivery."
+              exit 1
+            fi
+            echo "::warning::Scheduled push delivery is disabled until ALPHA_BASE_URL and ALPHA_CRON_SECRET are configured."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
+          if [[ ! "${ALPHA_BASE_URL}" =~ ^https://[^/]+/?$ ]]; then
+            echo "::error::ALPHA_BASE_URL must be the HTTPS origin of the deployed Alpha app, without a path."
+            exit 1
+          fi
+          if [[ ${#ALPHA_CRON_SECRET} -lt 32 ]]; then
+            echo "::error::ALPHA_CRON_SECRET must contain at least 32 characters."
+            exit 1
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Deliver due reminders
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          ALPHA_BASE_URL: ${{ vars.ALPHA_BASE_URL }}
+          ALPHA_CRON_SECRET: ${{ secrets.ALPHA_CRON_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
           base="${ALPHA_BASE_URL%/}"
-          curl --fail --silent --show-error --max-time 90 \
+          response="$(curl --fail --silent --show-error --max-time 90 \
             -X POST "${base}/api/push/cron" \
             -H "Authorization: Bearer ${ALPHA_CRON_SECRET}" \
             -H "Content-Type: application/json" \
-            --data '{}'
+            --data '{}')"
+
+          if ! jq -e '.success == true' >/dev/null <<< "$response"; then
+            echo "::error::Alpha push endpoint returned an unexpected response."
+            echo "$response"
+            exit 1
+          fi
+
+          jq -c '{scanned, attempted, sent, expired, failed}' <<< "$response"
