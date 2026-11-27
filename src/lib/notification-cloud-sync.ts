@@ -108,8 +108,9 @@ export function initNotificationCloudSync(
       if (currentGeneration !== generation || getCurrentStoreUser() !== uid ||
           auth.currentUser?.uid !== uid || pausedAccounts.has(uid) || snapshot.metadata.fromCache) return;
       void (async () => {
-        const remote = snapshot.docs.map((item) => ({ ...item.data(), ackId: item.id }))
-          .filter((item) => item.userId === uid) as unknown as AcknowledgementRecord[];
+        const remote = snapshot.docs
+          .map((item) => ({ ...item.data(), ackId: item.id }) as unknown as AcknowledgementRecord)
+          .filter((item) => item.userId === uid);
         const local = await acknowledgements.listAcknowledgements(uid);
         await reconcile(remote, local, async (records) => {
           await acknowledgements.replaceAllFromCloud?.(uid, records);
@@ -122,8 +123,9 @@ export function initNotificationCloudSync(
         if (currentGeneration !== generation || getCurrentStoreUser() !== uid ||
             auth.currentUser?.uid !== uid || pausedAccounts.has(uid) || snapshot.metadata.fromCache) return;
         void (async () => {
-          const remote = snapshot.docs.map((item) => ({ ...item.data(), deliveryId: item.id }))
-            .filter((item) => item.userId === uid) as unknown as DeliveryRecord[];
+          const remote = snapshot.docs
+            .map((item) => ({ ...item.data(), deliveryId: item.id }) as unknown as DeliveryRecord)
+            .filter((item) => item.userId === uid);
           const local = await deliveries.listDeliveries(uid);
           await reconcile(remote, local, async (records) => {
             await deliveries.replaceAllFromCloud?.(uid, records);
