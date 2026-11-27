@@ -156,6 +156,10 @@ export function initReminderCloudSync(repository: ReminderRepository): () => voi
           const merged = new Map<string, FirestoreReminder>();
 
           for (const local of localItems) {
+            if (deleted.has(local.id)) {
+              void deleteReminderFromCloud(uid, local.id);
+              continue;
+            }
             const remote = cloudById.get(local.id);
             if (remote) {
               if (timestamp(local) > timestamp(remote)) {
@@ -183,7 +187,7 @@ export function initReminderCloudSync(repository: ReminderRepository): () => voi
 
           // A tombstone no longer needs to be retained once the server snapshot
           // confirms that the remote document is absent.
-          const remoteIds = new Set(cloudItems.map((item) => item.id));
+          const remoteIds = new Set(snapshot.docs.map((item) => item.id));
           for (const id of Array.from(deleted)) {
             if (!remoteIds.has(id)) deleted.delete(id);
           }
