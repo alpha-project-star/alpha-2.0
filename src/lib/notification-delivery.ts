@@ -266,7 +266,10 @@ export class LocalDeliveryRepository implements DeliveryRepository {
       const local = await this.listDeliveries(userId);
       for (const record of local) {
         const remote = merged.get(record.deliveryId);
-        if (!remote || record.updatedAt > remote.updatedAt) merged.set(record.deliveryId, record);
+        if (!remote || record.updatedAt > remote.updatedAt) {
+          merged.set(record.deliveryId, record);
+          void syncDeliveryToCloud(userId, record);
+        }
       }
 
       const values = Array.from(merged.values());
