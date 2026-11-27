@@ -2,6 +2,8 @@
 
 Alpha is a voice-first, futuristic AI companion built with **TanStack Start**, **React 19**, **Tailwind CSS v4**, and **Vite**. It runs as a Progressive Web App (PWA) on your phone or desktop.
 
+Alpha is local-first: browser data remains available on the device, while selected authenticated data (including reminders, notes, memories, tasks, bills, goals, and notification history) can synchronize through the configured Firebase project. Cloud synchronization is account-scoped and requires deployed Firestore rules.
+
 ## Requirements
 
 - **Node.js** 20+ (22 LTS recommended)
@@ -33,8 +35,8 @@ Copy `.env.example` to `.env` if you need to set anything:
 cp .env.example .env
 ```
 
-| Variable   | Purpose                                                                           |
-| ---------- | --------------------------------------------------------------------------------- |
+| Variable | Purpose |
+| --- | --- |
 | `NODE_ENV` | `development` or `production` |
 | `VITE_VAPID_PUBLIC_KEY` | Public Web Push application-server key used by the browser |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Server-only Web Push signing configuration |
@@ -42,6 +44,7 @@ cp .env.example .env
 | `FIREBASE_PROJECT_ID` | Optional project ID override (defaults to the service account project) |
 | `FIRESTORE_DATABASE_ID` | Exact Firestore database ID used by the Firebase app |
 | `ALPHA_CRON_SECRET` | At least 32 random characters; protects the scheduled push endpoint |
+| `ALPHA_BASE_URL` | Deployed HTTPS origin used by the GitHub Actions scheduler |
 | `VITE_*` | Values prefixed with `VITE_` are public and must never contain secrets |
 
 ## API keys you need
@@ -86,16 +89,16 @@ bun run preview
 
 ## Exporting / importing your Alpha data
 
-All your data (chat history, notes, reminders, memories, settings, and uploaded music) is stored locally in your browser. To move it to another device or back it up:
+Data is stored locally in the browser and can be exported for backup. Selected records also synchronize to the signed-in user's Firestore collections when cloud sync is configured.
 
 1. Go to **Settings → Alpha Data → Export / Import**.
 2. Tap **Export Alpha data** to download a JSON backup.
 3. On the new device, open Alpha and tap **Import Alpha data**.
-4. Select the backup file.
+4. Sign in with the same account to receive server-synchronized records; import the backup for local-only data and records not covered by cloud sync.
 
 ## Cross-device reminders and scheduled push
 
-Authenticated users' reminders, acknowledgement records, and notification-delivery history are mirrored to their UID-scoped Firestore collections. Local writes remain usable when offline and are reconciled when a server-backed Firestore snapshot becomes available. Cloud sync requires the configured Firebase project and deployed Firestore rules.
+Authenticated users' reminders, acknowledgement records, notification-delivery history, and selected Alpha records are mirrored to UID-scoped Firestore collections. Local writes remain usable when offline and are reconciled when a server-backed Firestore snapshot becomes available. Cloud sync requires the configured Firebase project and deployed Firestore rules.
 
 Background push delivery runs on the server, not in the browser. To enable it:
 
@@ -103,19 +106,19 @@ Background push delivery runs on the server, not in the browser. To enable it:
 2. Set `FIREBASE_SERVICE_ACCOUNT_JSON` to a service-account JSON value, and set `FIRESTORE_DATABASE_ID` to the exact database ID in `firebase-applet-config.json`. The service account needs Firestore read/write access to user reminder, push-subscription, and server-owned push-delivery documents. Never commit this JSON or any private key.
 3. Set a strong `ALPHA_CRON_SECRET` (at least 32 random characters) in the server environment.
 4. In GitHub repository settings, add the repository variable `ALPHA_BASE_URL` (the deployed app origin, without a trailing slash) and the repository secret `ALPHA_CRON_SECRET` with the same value as the server secret.
-5. The `Scheduled push delivery` GitHub Actions workflow calls `POST /api/push/cron` every five minutes. You can also invoke it from a trusted scheduler using `Authorization: Bearer <ALPHA_CRON_SECRET>`.
+5. The **Scheduled push delivery** GitHub Actions workflow calls `POST /api/push/cron` every five minutes. You can also invoke it from a trusted scheduler using `Authorization: Bearer <ALPHA_CRON_SECRET>`.
 
 Users must sign in, grant browser notification permission, and enable **Background push** in Settings on each device. The server sends a generic reminder notification and does not include reminder notes. A successful subscription does not prove that the host's cron workflow or server credentials are configured; verify the scheduled workflow and a real device delivery after deployment.
 
-## Moving from Lovable to your own host
+## Deployment
 
-Alpha uses TanStack Start with Nitro; it must be deployed as a full-stack app, not as a static-only export.
+Alpha is a full-stack TanStack Start application using Nitro. It must be deployed as a server-rendered application, not as a static-only export.
 
-- **Vercel:** `vercel.json` selects the TanStack Start framework. Nitro detects Vercel during the build and emits Vercel Functions for server routes. Do not override the build output directory with `.output/public`.
+- **Vercel:** `vercel.json` selects the TanStack Start framework. Nitro detects Vercel during the build and emits server functions. Do not override the build output directory with `.output/public`.
 - **Node.js hosts:** Build with `npm run build` (or `bun run build`) and start the generated server with `npm run start` (or `bun run start`), which runs `.output/server/index.mjs`.
-- Configure the server-only environment variables above on the host. The scheduled GitHub Actions workflow also needs the repository variable `ALPHA_BASE_URL` and secret `ALPHA_CRON_SECRET`.
+- Configure server-only environment variables on the host. The scheduled GitHub Actions workflow also needs the repository variable `ALPHA_BASE_URL` and secret `ALPHA_CRON_SECRET`.
 
-A static hosting target that serves only `.output/public` cannot run the scheduled push endpoint or other server routes.
+A static hosting target that serves only `.output/public` cannot run the scheduled push endpoint or other server routes. See [DEPLOYMENT.md](./DEPLOYMENT.md) for the release checklist.
 
 ## Project structure
 
@@ -127,7 +130,7 @@ src/
   styles.css       # Tailwind v4 + custom design tokens
   router.tsx       # Router setup
   server.ts        # SSR entry wrapper
-public/            # Static assets: icons, manifest, images
+public/            # Static assets, manifest, icons and service worker
 ```
 
 ## Need help?
