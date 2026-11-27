@@ -73,7 +73,8 @@ export async function syncReminderToCloud(userId: string, reminder: FirestoreRem
 
 export async function deleteReminderFromCloud(userId: string, reminderId: string): Promise<void> {
   const user = auth.currentUser;
-  if (!user || user.uid !== userId || getCurrentStoreUser() !== userId || applyingRemote.has(userId)) return;
+  if (!user || user.uid !== userId || getCurrentStoreUser() !== userId ||
+      applyingRemote.has(userId) || pausedAccounts.has(userId)) return;
   try {
     await deleteDoc(doc(db, "users", userId, "reminders", reminderId));
     const known = readKnownIds(userId);
