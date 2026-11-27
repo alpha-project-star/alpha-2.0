@@ -29,7 +29,7 @@ async function signUp(email, password) {
   if (!response.ok) throw new Error(`Auth emulator sign-up failed: ${response.status} ${await response.text()}`);
   const data = await response.json();
   if (!data.idToken) throw new Error("Auth emulator returned no ID token");
-  return data.idToken;
+  return { token: data.idToken, uid: data.localId };
 }
 
 async function request(method, path, token, data) {
@@ -74,85 +74,89 @@ const delivery = (userId, deliveryId) => ({
   createdAt: now, updatedAt: now, retryCount: 0, deliveredAt: now,
 });
 
-const [aliceToken, bobToken] = await Promise.all([
+const [alice, bob] = await Promise.all([
   signUp("alice@example.test", "TestPassword123!"),
   signUp("bob@example.test", "TestPassword123!"),
 ]);
+const aliceToken = alice.token;
+const bobToken = bob.token;
+const aliceUid = alice.uid;
+const bobUid = bob.uid;
 
 await expectAllowed(
-  request("PATCH", "users/alice/reminders/test", aliceToken, reminder("alice", "test")),
+  request("PATCH", `users/${aliceUid}/reminders/test`, aliceToken, reminder(aliceUid, "test")),
   "owner reminder create",
 );
-await expectAllowed(request("GET", "users/alice/reminders/test", aliceToken), "owner reminder read");
-await expectDenied(request("GET", "users/bob/reminders/test", aliceToken), "cross-account reminder read");
+await expectAllowed(request("GET", `users/${aliceUid}/reminders/test`, aliceToken), "owner reminder read");
+await expectDenied(request("GET", `users/${bobUid}/reminders/test`, aliceToken), "cross-account reminder read");
 await expectDenied(
-  request("PATCH", "users/bob/reminders/forged", aliceToken, reminder("bob", "forged")),
+  request("PATCH", `users/${bobUid}/reminders/forged`, aliceToken, reminder(bobUid, "forged")),
   "cross-account reminder create",
 );
 await expectDenied(
-  request("GET", "users/alice/reminders/test", null),
+  request("GET", `users/${aliceUid}/reminders/test`, null),
   "unauthenticated reminder read",
 );
 
 const ackId = "due_test_123:in_app:ack";
 await expectAllowed(
-  request("PATCH", `users/alice/acknowledgements/${ackId}`, aliceToken, acknowledgement("alice", ackId)),
+  request("PATCH", `users/${aliceUid}/acknowledgements/${ackId}`, aliceToken, acknowledgement(aliceUid, ackId)),
   "owner acknowledgement create",
 );
 await expectDenied(
-  request("PATCH", "users/alice/acknowledgements/forged", aliceToken, acknowledgement("bob", "forged")),
+  request("PATCH", `users/${aliceUid}/acknowledgements/forged`, aliceToken, acknowledgement(bobUid, "forged")),
   "forged acknowledgement owner",
 );
 
 await expectAllowed(
-  request("PATCH", "users/alice/pushSubscriptions/sub_1", aliceToken, subscription("alice", "sub_1")),
+  request("PATCH", `users/${aliceUid}/pushSubscriptions/sub_1`, aliceToken, subscription(aliceUid, "sub_1")),
   "valid push subscription create",
 );
 await expectDenied(
-  request("PATCH", "users/alice/pushSubscriptions/sub_bad", aliceToken,
-    subscription("alice", "sub_bad", "http://not-secure.example.test/subscription")),
+  request("PATCH", `users/${aliceUid}/pushSubscriptions/sub_bad`, aliceToken,
+    subscription(aliceUid, "sub_bad", "http://not-secure.example.test/subscription")),
   "insecure push endpoint",
 );
 await expectDenied(
-  request("PATCH", "users/bob/pushSubscriptions/sub_2", aliceToken, subscription("bob", "sub_2")),
+  request("PATCH", `users/${bobUid}/pushSubscriptions/sub_2`, aliceToken, subscription(bobUid, "sub_2")),
   "cross-account push subscription create",
 );
 
 const deliveryId = "due_test_123:in_app";
 await expectAllowed(
-  request("PATCH", `users/alice/notificationDeliveries/${deliveryId}`, aliceToken, delivery("alice", deliveryId)),
+  request("PATCH", `users/${aliceUid}/notificationDeliveries/${deliveryId}`, aliceToken, delivery(aliceUid, deliveryId)),
   "owner notification delivery create",
 );
 
 // Seed a server-owned push marker with emulator admin credentials. Clients may
 // read/delete their own markers for account wipe, but cannot forge/update them.
 await expectAllowed(
-  request("PATCH", "users/alice/pushDeliveries/server_only", "owner", {
-    userId: "alice", status: "sent", eventId: "due_test_123",
+  request("PATCH", `users/${aliceUid}/pushDeliveries/server_only`, "owner", {
+    userId: aliceUid, status: "sent", eventId: "due_test_123",
   }),
   "admin seed push marker",
 );
 await expectAllowed(
-  request("GET", "users/alice/pushDeliveries/server_only", aliceToken),
+  request("GET", `users/${aliceUid}/pushDeliveries/server_only`, aliceToken),
   "owner push marker read",
 );
 await expectDenied(
-  request("PATCH", "users/alice/pushDeliveries/forged", aliceToken, {
-    userId: "alice", status: "sent",
+  request("PATCH", `users/${aliceUid}/pushDeliveries/forged`, aliceToken, {
+    userId: aliceUid, status: "sent",
   }),
   "client push marker forgery",
 );
 await expectAllowed(
-  request("DELETE", "users/alice/pushDeliveries/server_only", aliceToken),
+  request("DELETE", `users/${aliceUid}/pushDeliveries/server_only`, aliceToken),
   "owner push marker cleanup",
 );
 
 await expectAllowed(
-  request("PATCH", "users/bob/reminders/private", bobToken, reminder("bob", "private")),
+  request("PATCH", `users/${bobUid}/reminders/private`, bobToken, reminder(bobUid, "private")),
   "second owner reminder create",
 );
 await expectDenied(
-  request("GET", "users/bob/reminders/private", aliceToken),
+  request("GET", `users/${bobUid}/reminders/private`, aliceToken),
   "second cross-account reminder read",
 );
 
