@@ -136,19 +136,20 @@ self.addEventListener("fetch", (event) => {
 
   if (!isCacheableStaticAsset(url)) return;
 
-  event.respondWith((async () => {
-    const cache = await caches.open(STATIC_CACHE);
-    const cached = await cache.match(request);
-    const network = fetch(request).then(async (response) => {
-      if (response.ok && response.type === "basic") {
-        await cache.put(request, response.clone());
-      }
-      return response;
-    });
-    if (cached) {
-      event.waitUntil(network.catch(() => undefined));
-      return cached;
+  const cachePromise = caches.open(STATIC_CACHE);
+  const network = cachePromise.then((cache) => fetch(request).then(async (response) => {
+    if (response.ok && response.type === "basic") {
+      await cache.put(request, response.clone());
     }
+    return response;
+  }));
+  // Extend the fetch event before yielding; cached responses remain immediate
+  // while the network refresh is allowed to finish in the background.
+  event.waitUntil(network.catch(() => undefined));
+  event.respondWith((async () => {
+    const cache = await cachePromise;
+    const cached = await cache.match(request);
+    if (cached) return cached;
     try {
       return await network;
     } catch {
