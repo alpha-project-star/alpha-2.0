@@ -384,6 +384,9 @@ export async function processDuePushReminders(now = Date.now()): Promise<{
   expired: number;
   failed: number;
 }> {
+  if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+    throw new Error("VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY must be configured before scheduled push delivery can run");
+  }
   const account = getFirebaseServiceAccount();
   const token = await getGoogleAccessToken(account);
   const baseUrl = firestoreBaseUrl(account);
