@@ -571,7 +571,11 @@ export async function wipeAlphaData() {
   if (currentUid === "unauthenticated") throw new Error("Sign in before wiping account data.");
 
   const cloudSync = await import("./cloud-sync");
+  const reminderCloudSync = await import("./reminder-cloud-sync");
+  const notificationCloudSync = await import("./notification-cloud-sync");
   cloudSync.pauseCloudSyncForAccount(currentUid);
+  reminderCloudSync.pauseReminderCloudSyncForAccount(currentUid);
+  notificationCloudSync.pauseNotificationCloudSyncForAccount(currentUid);
   try {
     // Remove cloud records first. If the cloud operation fails, local data is
     // left intact so the user can retry without losing the only remaining copy.
@@ -623,6 +627,8 @@ export async function wipeAlphaData() {
       }
     });
   } finally {
+    notificationCloudSync.resumeNotificationCloudSyncForAccount(currentUid);
+    reminderCloudSync.resumeReminderCloudSyncForAccount(currentUid);
     cloudSync.resumeCloudSyncForAccount(currentUid);
   }
 }
