@@ -5,6 +5,7 @@ import { getCurrentStoreUser, getKey, getStorage } from "./alpha-store";
 import type { FirestoreReminder, ReminderRepository } from "./reminder-repo";
 
 const REMOTE_IDS_PREFIX = "alpha.reminderCloudIds.v1";
+const REMOTE_DELETIONS_PREFIX = "alpha.reminderCloudDeletes.v1";
 const applyingRemote = new Set<string>();
 const pausedAccounts = new Set<string>();
 
@@ -31,6 +32,26 @@ function writeKnownIds(userId: string, ids: Set<string>): void {
     getStorage()?.setItem(getKey(REMOTE_IDS_PREFIX, userId), JSON.stringify(Array.from(ids)));
   } catch (error) {
     console.warn("[ReminderCloudSync] Could not persist remote reminder IDs:", error);
+  }
+}
+
+function readDeletedIds(userId: string): Set<string> {
+  try {
+    const raw = getStorage()?.getItem(getKey(REMOTE_DELETIONS_PREFIX, userId));
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeDeletedIds(userId: string, ids: Set<string>): void {
+  try {
+    const key = getKey(REMOTE_DELETIONS_PREFIX, userId);
+    if (ids.size) getStorage()?.setItem(key, JSON.stringify(Array.from(ids)));
+    else getStorage()?.removeItem(key);
+  } catch (error) {
+    console.warn("[ReminderCloudSync] Could not persist reminder deletion queue:", error);
   }
 }
 
@@ -72,16 +93,24 @@ export async function syncReminderToCloud(userId: string, reminder: FirestoreRem
 }
 
 export async function deleteReminderFromCloud(userId: string, reminderId: string): Promise<void> {
+  if (applyingRemote.has(userId) || pausedAccounts.has(userId)) return;
+  const deleted = readDeletedIds(userId);
+  deleted.add(reminderId);
+  writeDeletedIds(userId, deleted);
+
   const user = auth.currentUser;
-  if (!user || user.uid !== userId || getCurrentStoreUser() !== userId ||
-      applyingRemote.has(userId) || pausedAccounts.has(userId)) return;
+  if (!user || user.uid !== userId || getCurrentStoreUser() !== userId) return;
   try {
     await deleteDoc(doc(db, "users", userId, "reminders", reminderId));
+    deleted.delete(reminderId);
+    writeDeletedIds(userId, deleted);
     const known = readKnownIds(userId);
     known.delete(reminderId);
     writeKnownIds(userId, known);
   } catch (error) {
-    console.warn("[ReminderCloudSync] Reminder deletion remains local; cloud delete failed:", error);
+    // Keep the tombstone so a later server-backed snapshot retries the delete
+    // instead of resurrecting the reminder after an offline local deletion.
+    console.warn("[ReminderCloudSync] Reminder deletion queued for retry:", error);
   }
 }
 
@@ -123,6 +152,7 @@ export function initReminderCloudSync(repository: ReminderRepository): () => voi
           const cloudById = new Map(cloudItems.map((item) => [item.id, item]));
           const localItems = await repository.listReminders(uid);
           const known = readKnownIds(uid);
+          const deleted = readDeletedIds(uid);
           const merged = new Map<string, FirestoreReminder>();
 
           for (const local of localItems) {
@@ -143,7 +173,21 @@ export function initReminderCloudSync(repository: ReminderRepository): () => voi
             // deletion; do not reintroduce the stale local copy.
           }
 
-          for (const remote of cloudItems) merged.set(remote.id, remote);
+          for (const remote of cloudItems) {
+            if (deleted.has(remote.id)) {
+              void deleteReminderFromCloud(uid, remote.id);
+              continue;
+            }
+            merged.set(remote.id, remote);
+          }
+
+          // A tombstone no longer needs to be retained once the server snapshot
+          // confirms that the remote document is absent.
+          const remoteIds = new Set(cloudItems.map((item) => item.id));
+          for (const id of Array.from(deleted)) {
+            if (!remoteIds.has(id)) deleted.delete(id);
+          }
+          writeDeletedIds(uid, deleted);
 
           applyingRemote.add(uid);
           try {
