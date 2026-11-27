@@ -255,18 +255,32 @@ export class LocalDeliveryRepository implements DeliveryRepository {
   }
 
   async replaceAllFromCloud(userId: string, records: DeliveryRecord[]): Promise<void> {
-    const valid = records.filter((record) => record.userId === userId);
     const storage = getStorage();
-    if (storage) {
-      storage.setItem(this.getStorageKey(userId), JSON.stringify(valid));
-    } else {
-      for (const key of this.inMemoryFallback.keys()) {
-        if (key.startsWith(`${userId}:`)) this.inMemoryFallback.delete(key);
+    await withCrossContextLock(`alpha_delivery_repo_${userId}`, async () => {
+      const merged = new Map<string, DeliveryRecord>(
+        records.filter((record) => record.userId === userId).map((record) => [record.deliveryId, { ...record }]),
+      );
+
+      // Re-read under the lock so a local write that happened after the cloud
+      // snapshot was received cannot be overwritten by stale reconciliation.
+      const local = await this.listDeliveries(userId);
+      for (const record of local) {
+        const remote = merged.get(record.deliveryId);
+        if (!remote || record.updatedAt > remote.updatedAt) merged.set(record.deliveryId, record);
       }
-      for (const record of valid) {
-        this.inMemoryFallback.set(`${userId}:${record.deliveryId}`, { ...record });
+
+      const values = Array.from(merged.values());
+      if (storage) {
+        storage.setItem(this.getStorageKey(userId), JSON.stringify(values));
+      } else {
+        for (const key of this.inMemoryFallback.keys()) {
+          if (key.startsWith(`${userId}:`)) this.inMemoryFallback.delete(key);
+        }
+        for (const record of values) {
+          this.inMemoryFallback.set(`${userId}:${record.deliveryId}`, { ...record });
+        }
       }
-    }
+    });
   }
 
   clear(userId: string = getCurrentStoreUser()): void {
