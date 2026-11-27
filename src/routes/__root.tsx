@@ -20,6 +20,7 @@ import { backgroundRuntime } from "../lib/background-runtime";
 import { AuthProvider, useAuth } from "../lib/auth";
 import { LocalReminderRepository, reminderRepository } from "../lib/reminder-repo";
 import { initCloudSync } from "../lib/cloud-sync";
+import { initReminderCloudSync } from "../lib/reminder-cloud-sync";
 
 function NotFoundComponent() {
   return (
@@ -139,7 +140,12 @@ function AppContent() {
   const user = auth.status === 'authenticated' ? auth.user : null;
 
   useEffect(() => {
-    return initCloudSync();
+    const stopCloudSync = initCloudSync();
+    const stopReminderSync = initReminderCloudSync(reminderRepository);
+    return () => {
+      stopReminderSync();
+      stopCloudSync();
+    };
   }, []);
 
   useEffect(() => {
