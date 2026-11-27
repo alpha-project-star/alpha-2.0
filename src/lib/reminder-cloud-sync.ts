@@ -55,6 +55,12 @@ function writeDeletedIds(userId: string, ids: Set<string>): void {
   }
 }
 
+function clearDeletedId(userId: string, reminderId: string): void {
+  const current = readDeletedIds(userId);
+  if (!current.delete(reminderId)) return;
+  writeDeletedIds(userId, current);
+}
+
 function isReminderDocument(value: unknown, id: string, userId: string): value is FirestoreReminder {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
@@ -152,14 +158,19 @@ export function initReminderCloudSync(repository: ReminderRepository): () => voi
           const cloudById = new Map(cloudItems.map((item) => [item.id, item]));
           const localItems = await repository.listReminders(uid);
           const known = readKnownIds(uid);
-          const deleted = readDeletedIds(uid);
+          const deletedAtSnapshot = readDeletedIds(uid);
           const merged = new Map<string, FirestoreReminder>();
 
-          for (const local of localItems) {
-            if (deleted.has(local.id)) {
-              void deleteReminderFromCloud(uid, local.id);
-              continue;
+          // Retry deletes for every tombstoned ID still present in this server
+          // snapshot, including legacy/malformed documents that fail validation.
+          for (const document of snapshot.docs) {
+            if (deletedAtSnapshot.has(document.id)) {
+              void deleteReminderFromCloud(uid, document.id);
             }
+          }
+
+          for (const local of localItems) {
+            if (deletedAtSnapshot.has(local.id)) continue;
             const remote = cloudById.get(local.id);
             if (remote) {
               if (timestamp(local) > timestamp(remote)) {
@@ -178,20 +189,16 @@ export function initReminderCloudSync(repository: ReminderRepository): () => voi
           }
 
           for (const remote of cloudItems) {
-            if (deleted.has(remote.id)) {
-              void deleteReminderFromCloud(uid, remote.id);
-              continue;
-            }
+            if (deletedAtSnapshot.has(remote.id)) continue;
             merged.set(remote.id, remote);
           }
 
           // A tombstone no longer needs to be retained once the server snapshot
           // confirms that the remote document is absent.
           const remoteIds = new Set(snapshot.docs.map((item) => item.id));
-          for (const id of Array.from(deleted)) {
-            if (!remoteIds.has(id)) deleted.delete(id);
+          for (const id of deletedAtSnapshot) {
+            if (!remoteIds.has(id)) clearDeletedId(uid, id);
           }
-          writeDeletedIds(uid, deleted);
 
           applyingRemote.add(uid);
           try {
