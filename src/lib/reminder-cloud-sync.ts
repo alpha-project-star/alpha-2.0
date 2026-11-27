@@ -6,6 +6,15 @@ import type { FirestoreReminder, ReminderRepository } from "./reminder-repo";
 
 const REMOTE_IDS_PREFIX = "alpha.reminderCloudIds.v1";
 const applyingRemote = new Set<string>();
+const pausedAccounts = new Set<string>();
+
+export function pauseReminderCloudSyncForAccount(userId: string): void {
+  if (userId) pausedAccounts.add(userId);
+}
+
+export function resumeReminderCloudSyncForAccount(userId: string): void {
+  pausedAccounts.delete(userId);
+}
 
 function readKnownIds(userId: string): Set<string> {
   try {
@@ -46,7 +55,8 @@ function timestamp(item: FirestoreReminder): number {
 /** Best-effort cloud mirror; local persistence remains available while offline. */
 export async function syncReminderToCloud(userId: string, reminder: FirestoreReminder): Promise<void> {
   const user = auth.currentUser;
-  if (!user || user.uid !== userId || getCurrentStoreUser() !== userId || applyingRemote.has(userId)) return;
+  if (!user || user.uid !== userId || getCurrentStoreUser() !== userId ||
+      applyingRemote.has(userId) || pausedAccounts.has(userId)) return;
   try {
     await setDoc(doc(db, "users", userId, "reminders", reminder.id), {
       ...reminder,
@@ -98,6 +108,7 @@ export function initReminderCloudSync(repository: ReminderRepository): () => voi
           activeGeneration !== generation ||
           getCurrentStoreUser() !== uid ||
           auth.currentUser?.uid !== uid ||
+          pausedAccounts.has(uid) ||
           snapshot.metadata.fromCache
         ) return;
 
