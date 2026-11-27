@@ -22,6 +22,7 @@
 
 import { getStorage, getKey, getCurrentStoreUser, PersistenceError } from './alpha-store';
 import { withCrossContextLock } from './cross-context-lock';
+import { deleteReminderFromCloud, syncReminderToCloud } from './reminder-cloud-sync';
 
 export type ReminderState = 'active' | 'completed' | 'cancelled' | 'passed' | 'acknowledged';
 export type NotificationState = 'pending' | 'claimed' | 'accepted' | 'failed';
@@ -328,6 +329,7 @@ export class LocalReminderRepository implements ReminderRepository {
       nextMap.set(reminder.id, nextReminder);
       this.save(userId, nextMap);
       this.store.set(reminder.id, nextReminder);
+      void syncReminderToCloud(userId, nextReminder);
     });
   }
 
@@ -352,6 +354,7 @@ export class LocalReminderRepository implements ReminderRepository {
       nextMap.set(reminderId, updated);
       this.save(userId, nextMap);
       this.store.set(reminderId, updated);
+      void syncReminderToCloud(userId, updated);
     });
   }
 
@@ -364,14 +367,17 @@ export class LocalReminderRepository implements ReminderRepository {
       nextMap.delete(reminderId);
       this.save(userId, nextMap);
       this.store.delete(reminderId);
+      void deleteReminderFromCloud(userId, reminderId);
     });
   }
 
   async clear(userId: string = getCurrentStoreUser()): Promise<void> {
     const key = this.storageKey(userId);
     await withCrossContextLock(key, async () => {
+      const existing = await this.listReminders(userId).catch(() => []);
       this.memoryStores.delete(userId);
       this.store.clear();
+      for (const reminder of existing) void deleteReminderFromCloud(userId, reminder.id);
       const storage = getStorage();
       if (storage) {
         try {
@@ -393,6 +399,7 @@ export class LocalReminderRepository implements ReminderRepository {
         nextMap.set(reminder.id, { ...reminder });
       }
       this.save(userId, nextMap);
+      for (const reminder of nextMap.values()) void syncReminderToCloud(userId, reminder);
     });
   }
 }
