@@ -55,16 +55,23 @@ export function initNotificationCloudSync(
     if (!user?.uid) return;
 
     const uid = user.uid;
-    const reconcile = async <T extends { userId: string; updatedAt: number; createdAt?: number; [key: string]: unknown }>(
+    const reconcile = async <T extends {
+      userId: string;
+      updatedAt: number;
+      createdAt?: number;
+      ackId?: string;
+      deliveryId?: string;
+    }>(
       remoteItems: T[],
       localItems: T[],
       replace: (records: T[]) => Promise<void>,
       sync: (record: T) => Promise<void>,
     ) => {
-      const remoteById = new Map(remoteItems.map((item) => [String(item.ackId ?? item.deliveryId), item]));
+      const recordId = (item: T) => String(item.ackId ?? item.deliveryId ?? "");
+      const remoteById = new Map(remoteItems.map((item) => [recordId(item), item]));
       const merged = new Map<string, T>();
       for (const local of localItems) {
-        const id = String(local.ackId ?? local.deliveryId);
+        const id = recordId(local);
         const remote = remoteById.get(id);
         if (remote && updatedAt(remote) >= updatedAt(local)) {
           merged.set(id, remote);
@@ -74,7 +81,7 @@ export function initNotificationCloudSync(
         }
       }
       for (const remote of remoteItems) {
-        const id = String(remote.ackId ?? remote.deliveryId);
+        const id = recordId(remote);
         if (!merged.has(id)) merged.set(id, remote);
       }
       await replace(Array.from(merged.values()));
