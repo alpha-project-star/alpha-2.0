@@ -119,7 +119,8 @@ export default defineConfig({
       }),
     !isTest &&
       nitro({
-        preset: "node-server",
+        // Nitro selects the Vercel preset automatically on Vercel and keeps
+        // the Node server preset for ordinary Node-host deployments.
         devServer: {
           port: 3001,
           hostname: "127.0.0.1",
