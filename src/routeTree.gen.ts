@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ApiPushCronRouteImport } from './routes/api.push.cron'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as BillsRouteImport } from './routes/bills'
 import { Route as ChatRouteImport } from './routes/chat'
@@ -20,6 +21,11 @@ import { Route as PlansRouteImport } from './routes/plans'
 import { Route as RemindersRouteImport } from './routes/reminders'
 import { Route as SettingsRouteImport } from './routes/settings'
 
+const ApiPushCronRoute = ApiPushCronRouteImport.update({
+  id: '/api/push/cron',
+  path: '/api/push/cron',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -72,6 +78,7 @@ const SettingsRoute = SettingsRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
+  '/api/push/cron': typeof ApiPushCronRoute
   '/': typeof IndexRoute
   '/bills': typeof BillsRoute
   '/chat': typeof ChatRoute
@@ -84,6 +91,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesByTo {
+  '/api/push/cron': typeof ApiPushCronRoute
   '/': typeof IndexRoute
   '/bills': typeof BillsRoute
   '/chat': typeof ChatRoute
@@ -97,6 +105,7 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/api/push/cron': typeof ApiPushCronRoute
   '/': typeof IndexRoute
   '/bills': typeof BillsRoute
   '/chat': typeof ChatRoute
@@ -111,6 +120,7 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
+    | '/api/push/cron'
     | '/'
     | '/bills'
     | '/chat'
@@ -123,6 +133,7 @@ export interface FileRouteTypes {
     | '/settings'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/api/push/cron'
     | '/'
     | '/bills'
     | '/chat'
@@ -135,6 +146,7 @@ export interface FileRouteTypes {
     | '/settings'
   id:
     | '__root__'
+    | '/api/push/cron'
     | '/'
     | '/bills'
     | '/chat'
@@ -148,6 +160,7 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  ApiPushCronRoute: typeof ApiPushCronRoute
   IndexRoute: typeof IndexRoute
   BillsRoute: typeof BillsRoute
   ChatRoute: typeof ChatRoute
@@ -162,6 +175,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/api/push/cron': {
+      id: '/api/push/cron'
+      path: '/api/push/cron'
+      fullPath: '/api/push/cron'
+      preLoaderRoute: typeof ApiPushCronRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -236,6 +256,7 @@ declare module '@tanstack/react-router' {
 }
 
 const rootRouteChildren: RootRouteChildren = {
+  ApiPushCronRoute: ApiPushCronRoute,
   IndexRoute: IndexRoute,
   BillsRoute: BillsRoute,
   ChatRoute: ChatRoute,
