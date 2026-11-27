@@ -115,7 +115,10 @@ export class LocalAcknowledgementRepository implements AcknowledgementRepository
       // when a Firestore snapshot reconciliation completes asynchronously.
       for (const record of this.loadAll(userId).values()) {
         const remote = merged.get(record.ackId);
-        if (!remote || record.updatedAt > remote.updatedAt) merged.set(record.ackId, record);
+        if (!remote || record.updatedAt > remote.updatedAt) {
+          merged.set(record.ackId, record);
+          void syncAcknowledgementToCloud(userId, record);
+        }
       }
       getStorage()?.setItem(this.storageKey(userId), JSON.stringify(Array.from(merged.values())));
     });
