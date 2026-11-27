@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { deleteDoc, doc, getDoc, setDoc } from "firebase/firestore";
 
 const projectId = "demo-alpha-firestore-rules";
 const rules = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
@@ -87,10 +87,19 @@ try {
     doc(alice, "users/alice/notificationDeliveries/due_test_123:in_app"),
     delivery("alice", "due_test_123:in_app"),
   ));
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "users/alice/pushDeliveries/server_only"), {
+      userId: "alice",
+      status: "sent",
+      eventId: "due_test_123",
+    });
+  });
+  await assertSucceeds(getDoc(doc(alice, "users/alice/pushDeliveries/server_only")));
   await assertFails(setDoc(
-    doc(alice, "users/alice/pushDeliveries/server_only"),
+    doc(alice, "users/alice/pushDeliveries/forged"),
     { userId: "alice", status: "sent" },
   ));
+  await assertSucceeds(deleteDoc(doc(alice, "users/alice/pushDeliveries/server_only")));
 
   await assertSucceeds(setDoc(
     doc(bob, "users/bob/reminders/private"),
