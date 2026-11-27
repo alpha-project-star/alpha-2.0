@@ -37,7 +37,7 @@ export async function syncDeliveryToCloud(userId: string, record: DeliveryRecord
 /** Mirrors acknowledgement and delivery lifecycle records across a user's devices. */
 export function initNotificationCloudSync(
   acknowledgements: ReplaceableAcknowledgements,
-  deliveries: ReplaceableDeliveries,
+  deliveries?: ReplaceableDeliveries,
 ): () => void {
   if (typeof window === "undefined") return () => {};
 
@@ -100,18 +100,20 @@ export function initNotificationCloudSync(
       })().catch((error) => console.error("[NotificationCloudSync] Acknowledgement merge failed:", error));
     }, (error) => console.warn("[NotificationCloudSync] Acknowledgement listener failed:", error));
 
-    unsubscribeDelivery = onSnapshot(collection(db, "users", uid, "notificationDeliveries"), (snapshot) => {
-      if (currentGeneration !== generation || getCurrentStoreUser() !== uid ||
-          auth.currentUser?.uid !== uid || snapshot.metadata.fromCache) return;
-      void (async () => {
-        const remote = snapshot.docs.map((item) => ({ ...item.data(), deliveryId: item.id }))
-          .filter((item) => item.userId === uid) as unknown as DeliveryRecord[];
-        const local = await deliveries.listDeliveries(uid);
-        await reconcile(remote, local, async (records) => {
-          await deliveries.replaceAllFromCloud?.(uid, records);
-        }, (record) => syncDeliveryToCloud(uid, record));
-      })().catch((error) => console.error("[NotificationCloudSync] Delivery merge failed:", error));
-    }, (error) => console.warn("[NotificationCloudSync] Delivery listener failed:", error));
+    if (deliveries) {
+      unsubscribeDelivery = onSnapshot(collection(db, "users", uid, "notificationDeliveries"), (snapshot) => {
+        if (currentGeneration !== generation || getCurrentStoreUser() !== uid ||
+            auth.currentUser?.uid !== uid || snapshot.metadata.fromCache) return;
+        void (async () => {
+          const remote = snapshot.docs.map((item) => ({ ...item.data(), deliveryId: item.id }))
+            .filter((item) => item.userId === uid) as unknown as DeliveryRecord[];
+          const local = await deliveries.listDeliveries(uid);
+          await reconcile(remote, local, async (records) => {
+            await deliveries.replaceAllFromCloud?.(uid, records);
+          }, (record) => syncDeliveryToCloud(uid, record));
+        })().catch((error) => console.error("[NotificationCloudSync] Delivery merge failed:", error));
+      }, (error) => console.warn("[NotificationCloudSync] Delivery listener failed:", error));
+    }
   });
 
   return () => {
