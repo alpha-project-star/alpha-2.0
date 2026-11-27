@@ -107,8 +107,18 @@ export class LocalAcknowledgementRepository implements AcknowledgementRepository
   }
 
   async replaceAllFromCloud(userId: string, records: AcknowledgementRecord[]): Promise<void> {
-    const valid = records.filter((record) => record.userId === userId);
-    getStorage()?.setItem(this.storageKey(userId), JSON.stringify(valid));
+    await withCrossContextLock(this.storageKey(userId), async () => {
+      const merged = new Map<string, AcknowledgementRecord>(
+        records.filter((record) => record.userId === userId).map((record) => [record.ackId, { ...record }]),
+      );
+      // Re-read under the lock so a newer local acknowledgement is not lost
+      // when a Firestore snapshot reconciliation completes asynchronously.
+      for (const record of this.loadAll(userId).values()) {
+        const remote = merged.get(record.ackId);
+        if (!remote || record.updatedAt > remote.updatedAt) merged.set(record.ackId, record);
+      }
+      getStorage()?.setItem(this.storageKey(userId), JSON.stringify(Array.from(merged.values())));
+    });
   }
 }
 
