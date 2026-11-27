@@ -116,7 +116,7 @@ export function initNotificationCloudSync(
     if (deliveries) {
       unsubscribeDelivery = onSnapshot(collection(db, "users", uid, "notificationDeliveries"), (snapshot) => {
         if (currentGeneration !== generation || getCurrentStoreUser() !== uid ||
-            auth.currentUser?.uid !== uid || snapshot.metadata.fromCache) return;
+            auth.currentUser?.uid !== uid || pausedAccounts.has(uid) || snapshot.metadata.fromCache) return;
         void (async () => {
           const remote = snapshot.docs.map((item) => ({ ...item.data(), deliveryId: item.id }))
             .filter((item) => item.userId === uid) as unknown as DeliveryRecord[];
