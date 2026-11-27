@@ -77,7 +77,9 @@ export function initNotificationCloudSync(
           merged.set(id, remote);
         } else {
           merged.set(id, local);
-          if (remote) void sync(local);
+          // Local-only records are uploaded on first account sync; newer local
+          // records replace the older remote version.
+          void sync(local);
         }
       }
       for (const remote of remoteItems) {
