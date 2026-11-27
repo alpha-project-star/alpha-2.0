@@ -1,0 +1,35 @@
+name: Scheduled push delivery
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alpha-scheduled-push
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Deliver due reminders
+        env:
+          ALPHA_BASE_URL: ${{ vars.ALPHA_BASE_URL }}
+          ALPHA_CRON_SECRET: ${{ secrets.ALPHA_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ALPHA_BASE_URL}" || -z "${ALPHA_CRON_SECRET}" ]]; then
+            echo "::warning::Set repository variable ALPHA_BASE_URL and secret ALPHA_CRON_SECRET to enable scheduled push delivery."
+            exit 0
+          fi
+          base="${ALPHA_BASE_URL%/}"
+          curl --fail --silent --show-error --max-time 90 \
+            -X POST "${base}/api/push/cron" \
+            -H "Authorization: Bearer ${ALPHA_CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            --data '{}'
