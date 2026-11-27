@@ -235,9 +235,12 @@ service cloud.firestore {
       allow read, write: if isOwner(userId);
     }
 
-    // Server-owned push delivery claims/results are intentionally not client writable.
+    // Server-owned push delivery claims/results cannot be forged by clients.
+    // The owner may read and delete their own markers so account wipe can clean them.
     match /users/{userId}/pushDeliveries/{deliveryId} {
-      allow read, write: if false;
+      allow read: if isOwner(userId);
+      allow create, update: if false;
+      allow delete: if isOwner(userId) && isValidId(deliveryId);
     }
 
     match /{document=**} {
