@@ -379,10 +379,6 @@ export class NotificationAcknowledgementManager {
     this.reminderRepo = repo;
   }
 
-  public getRepository(): AcknowledgementRepository {
-    return this.repo;
-  }
-
   private repoAlignCount = 0;
 
   public getReminderRepository(): ReminderRepository | null {
