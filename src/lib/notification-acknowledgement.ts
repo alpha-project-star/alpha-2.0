@@ -2,6 +2,7 @@ import { getStorage, getKey, PersistenceError } from './alpha-store';
 import { withCrossContextLock } from './cross-context-lock';
 import { ReminderRepository, reminderRepository } from './reminder-repo';
 import { reminderContextManager, ActiveReminderContext } from './reminder-context';
+import { syncAcknowledgementToCloud } from './notification-cloud-sync';
 
 export type AcknowledgementStatus = 'pending' | 'delivered' | 'acknowledged' | 'failed';
 
@@ -79,6 +80,7 @@ export class LocalAcknowledgementRepository implements AcknowledgementRepository
         if (record.userId !== userId) throw new Error('User isolation mismatch on acknowledgement save');
         all.set(record.ackId, record);
         getStorage()?.setItem(this.storageKey(userId), JSON.stringify(Array.from(all.values())));
+        void syncAcknowledgementToCloud(userId, record);
     });
   }
 
@@ -90,6 +92,7 @@ export class LocalAcknowledgementRepository implements AcknowledgementRepository
         const updated = { ...record, ...patch, userId, updatedAt: Date.now() };
         all.set(ackId, updated);
         getStorage()?.setItem(this.storageKey(userId), JSON.stringify(Array.from(all.values())));
+        void syncAcknowledgementToCloud(userId, updated);
     });
   }
 
@@ -101,6 +104,11 @@ export class LocalAcknowledgementRepository implements AcknowledgementRepository
   async getAcknowledgementByEventId(userId: string, eventId: string): Promise<AcknowledgementRecord | null> {
     const list = await this.listAcknowledgements(userId);
     return list.find(a => a.eventId === eventId) || null;
+  }
+
+  async replaceAllFromCloud(userId: string, records: AcknowledgementRecord[]): Promise<void> {
+    const valid = records.filter((record) => record.userId === userId);
+    getStorage()?.setItem(this.storageKey(userId), JSON.stringify(valid));
   }
 }
 
@@ -356,6 +364,10 @@ export class NotificationAcknowledgementManager {
   public setReminderRepository(repo: ReminderRepository) {
     this.repoAlignCount++; // track number of manual alignments for observability
     this.reminderRepo = repo;
+  }
+
+  public getRepository(): AcknowledgementRepository {
+    return this.repo;
   }
 
   private repoAlignCount = 0;
@@ -864,7 +876,8 @@ export class NotificationAcknowledgementManager {
   }
 }
 
+export const localAcknowledgementRepository = new LocalAcknowledgementRepository();
 export const notificationAcknowledgementManager = new NotificationAcknowledgementManager({
-  repo: new LocalAcknowledgementRepository()
+  repo: localAcknowledgementRepository
 });
 notificationAcknowledgementManager.setReminderRepository(reminderRepository);
