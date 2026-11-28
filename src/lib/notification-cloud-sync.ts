@@ -37,7 +37,7 @@ export async function syncAcknowledgementToCloud(userId: string, record: Acknowl
 }
 
 export async function syncDeliveryToCloud(userId: string, record: DeliveryRecord): Promise<void> {
-  if (auth.currentUser?.uid !== userId || getCurrentStoreUser() !== userId ||
+  if (auth.currentUser?.isAnonymous || auth.currentUser?.uid !== userId || getCurrentStoreUser() !== userId ||
       record.userId !== userId || pausedAccounts.has(userId)) return;
   try {
     await setDoc(doc(db, "users", userId, "notificationDeliveries", record.deliveryId), record, { merge: true });
