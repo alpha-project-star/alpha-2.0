@@ -7,7 +7,7 @@
 import { doc, setDoc, deleteDoc, onSnapshot, collection, getDocs, writeBatch } from "firebase/firestore";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { db, auth, handleFirestoreError, OperationType } from "./firebase";
-import { alphaStore, getStorage, getKey, getCurrentStoreUser, setStoreUser } from "./alpha-store";
+import { alphaStore, getStorage, getKey, getCurrentStoreUser, setStoreUser, getQueuedCloudDeletes, clearQueuedCloudDelete, enqueueCloudDelete } from "./alpha-store";
 
 let activeUnsubscribers: Array<() => void> = [];
 let currentSyncedUid: string | null = null;
@@ -133,10 +133,12 @@ export async function deleteDocFromCloud(
       pausedCloudSyncUids.has(user.uid)) return false;
 
   const uid = user.uid;
+  enqueueCloudDelete(uid, collectionName, id);
   const path = `users/${uid}/${collectionName}/${id}`;
   try {
     await deleteDoc(doc(db, "users", uid, collectionName, id));
     unmarkKnownRemoteId(uid, collectionName, id);
+    clearQueuedCloudDelete(uid, collectionName, id);
     return true;
   } catch (err: any) {
     console.warn(`[CloudSync] Background delete from ${path} failed:`, err?.message || err);
@@ -238,7 +240,10 @@ export function initCloudSync(): () => void {
 
             // A locally present ID previously known to exist remotely but now
             // absent from the server has been deleted elsewhere. Do not resurrect it.
+            const queuedDeletes = getQueuedCloudDeletes(uid).filter((item) => item.collectionName === entry.name);
+            const queuedDeleteIds = new Set(queuedDeletes.map((item) => item.id));
             for (const localItem of localItems) {
+              if (queuedDeleteIds.has(localItem.id)) continue;
               if (cloudById.has(localItem.id)) continue;
               if (knownIds.has(localItem.id)) continue;
               mergedById.set(localItem.id, localItem);
@@ -260,6 +265,10 @@ export function initCloudSync(): () => void {
             };
 
             for (const cloudItem of cloudItems) {
+              if (queuedDeleteIds.has(cloudItem.id)) {
+                void deleteDocFromCloud(entry.name, cloudItem.id);
+                continue;
+              }
               const localItem = localItems.find((item) => item.id === cloudItem.id);
               if (localItem && syncTimestamp(localItem) > syncTimestamp(cloudItem)) {
                 mergedById.set(localItem.id, localItem);
