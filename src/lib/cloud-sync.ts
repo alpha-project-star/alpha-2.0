@@ -146,6 +146,13 @@ export async function deleteDocFromCloud(
   }
 }
 
+async function retryQueuedCloudDeletes(uid: string): Promise<void> {
+  if (!uid || auth.currentUser?.uid !== uid || auth.currentUser.isAnonymous ||
+      getCurrentStoreUser() !== uid) return;
+  const pending = getQueuedCloudDeletes(uid);
+  await Promise.all(pending.map((item) => deleteDocFromCloud(item.collectionName, item.id)));
+}
+
 
 /**
  * Deletes the signed-in user's cloud-owned Alpha collections in bounded batches.
@@ -194,6 +201,10 @@ export async function wipeAccountCloudData(uid: string): Promise<void> {
 export function initCloudSync(): () => void {
   if (typeof window === "undefined") return () => {};
 
+  const retryOnOnline = () => {
+    if (currentSyncedUid) void retryQueuedCloudDeletes(currentSyncedUid);
+  };
+  window.addEventListener("online", retryOnOnline);
   const unsubscribeAuth = onAuthStateChanged(auth, (user: User | null) => {
     setStoreUser(user?.uid ?? null);
     activeUnsubscribers.forEach((unsubscribe) => {
@@ -208,6 +219,7 @@ export function initCloudSync(): () => void {
 
     const uid = user.uid;
     currentSyncedUid = uid;
+    void retryQueuedCloudDeletes(uid);
 
     const collections: Array<{ name: SyncCollection; stateKey: SyncStateKey }> = [
       { name: "memories", stateKey: "memories" },
@@ -280,6 +292,10 @@ export function initCloudSync(): () => void {
               }
             }
 
+            for (const queuedId of queuedDeleteIds) {
+              if (!cloudById.has(queuedId)) clearQueuedCloudDelete(uid, entry.name, queuedId);
+            }
+
             const merged = Array.from(mergedById.values());
             const nextMetadata: SyncMetadata = {
               ...metadata,
@@ -302,6 +318,7 @@ export function initCloudSync(): () => void {
 
   return () => {
     unsubscribeAuth();
+    window.removeEventListener("online", retryOnOnline);
     activeUnsubscribers.forEach((unsubscribe) => {
       try { unsubscribe(); } catch {}
     });
