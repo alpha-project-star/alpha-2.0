@@ -12,6 +12,7 @@ import {
 import { auth } from "./firebase";
 import { reminderContextManager } from "./reminder-context";
 import { setStoreUser } from "./alpha-store";
+import { unregisterPushSubscription } from "./push-subscription";
 
 export type AuthState = 
   | { status: 'loading' }
@@ -55,6 +56,11 @@ export async function signInWithGoogle(): Promise<User | null> {
  * Signs out the current Firebase user.
  */
 export async function signOutUser(): Promise<void> {
+  const user = auth.currentUser;
+  if (user && !user.isAnonymous) {
+    const cleanup = await unregisterPushSubscription(user.uid);
+    if (!cleanup.success) console.warn("[Auth] Push subscription cleanup is incomplete:", cleanup.error);
+  }
   await signOut(auth);
 }
 
