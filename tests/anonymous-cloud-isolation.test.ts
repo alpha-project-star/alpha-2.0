@@ -9,7 +9,7 @@ const { authMock, setDocMock, deleteDocMock, onSnapshotMock, collectionMock, doc
   docMock: vi.fn(),
   storeUser: { value: "anonymous-user" },
   queuedDeletes: [] as Array<{ collectionName: string; id: string }>,
-  cloudState: { records: { memories: [] as unknown[]; notes: [] as unknown[]; tasks: [] as unknown[]; bills: [] as unknown[]; goals: [] as unknown[] }, replaceAll: vi.fn() },
+  cloudState: { records: { memories: [] as unknown[], notes: [] as unknown[], tasks: [] as unknown[], bills: [] as unknown[], goals: [] as unknown[] }, replaceAll: vi.fn() },
 }));
 
 vi.mock("firebase/auth", () => ({
