@@ -168,7 +168,7 @@ export function resumeCloudSyncForAccount(uid: string): void {
 
 export async function wipeAccountCloudData(uid: string): Promise<void> {
   const user = auth.currentUser;
-  if (!uid || !user || user.uid !== uid || getCurrentStoreUser() !== uid) {
+  if (!uid || !user || user.isAnonymous || user.uid !== uid || getCurrentStoreUser() !== uid) {
     throw new Error("Cloud wipe refused: the active account does not match the requested UID.");
   }
 
