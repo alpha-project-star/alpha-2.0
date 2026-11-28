@@ -27,7 +27,7 @@ function updatedAt(record: { updatedAt: number; createdAt?: number }): number {
 }
 
 export async function syncAcknowledgementToCloud(userId: string, record: AcknowledgementRecord): Promise<void> {
-  if (auth.currentUser?.uid !== userId || getCurrentStoreUser() !== userId ||
+  if (auth.currentUser?.isAnonymous || auth.currentUser?.uid !== userId || getCurrentStoreUser() !== userId ||
       record.userId !== userId || pausedAccounts.has(userId)) return;
   try {
     await setDoc(doc(db, "users", userId, "acknowledgements", record.ackId), record, { merge: true });
@@ -37,7 +37,7 @@ export async function syncAcknowledgementToCloud(userId: string, record: Acknowl
 }
 
 export async function syncDeliveryToCloud(userId: string, record: DeliveryRecord): Promise<void> {
-  if (auth.currentUser?.uid !== userId || getCurrentStoreUser() !== userId ||
+  if (auth.currentUser?.isAnonymous || auth.currentUser?.uid !== userId || getCurrentStoreUser() !== userId ||
       record.userId !== userId || pausedAccounts.has(userId)) return;
   try {
     await setDoc(doc(db, "users", userId, "notificationDeliveries", record.deliveryId), record, { merge: true });
@@ -67,7 +67,7 @@ export function initNotificationCloudSync(
     unsubscribeAck = undefined;
     unsubscribeDelivery = undefined;
     unsubscribePushDelivery = undefined;
-    if (!user?.uid) return;
+    if (!user?.uid || user.isAnonymous) return;
 
     const uid = user.uid;
     const reconcile = async <T extends {

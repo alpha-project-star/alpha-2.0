@@ -82,7 +82,7 @@ function timestamp(item: FirestoreReminder): number {
 /** Best-effort cloud mirror; local persistence remains available while offline. */
 export async function syncReminderToCloud(userId: string, reminder: FirestoreReminder): Promise<void> {
   const user = auth.currentUser;
-  if (!user || user.uid !== userId || getCurrentStoreUser() !== userId ||
+  if (!user || user.isAnonymous || user.uid !== userId || getCurrentStoreUser() !== userId ||
       applyingRemote.has(userId) || pausedAccounts.has(userId)) return;
   try {
     await setDoc(doc(db, "users", userId, "reminders", reminder.id), {
@@ -99,13 +99,12 @@ export async function syncReminderToCloud(userId: string, reminder: FirestoreRem
 }
 
 export async function deleteReminderFromCloud(userId: string, reminderId: string): Promise<void> {
-  if (applyingRemote.has(userId) || pausedAccounts.has(userId)) return;
+  const user = auth.currentUser;
+  if (!user || user.isAnonymous || user.uid !== userId || getCurrentStoreUser() !== userId ||
+      applyingRemote.has(userId) || pausedAccounts.has(userId)) return;
   const deleted = readDeletedIds(userId);
   deleted.add(reminderId);
   writeDeletedIds(userId, deleted);
-
-  const user = auth.currentUser;
-  if (!user || user.uid !== userId || getCurrentStoreUser() !== userId) return;
   try {
     await deleteDoc(doc(db, "users", userId, "reminders", reminderId));
     deleted.delete(reminderId);
@@ -134,7 +133,7 @@ export function initReminderCloudSync(repository: ReminderRepository): () => voi
     const activeGeneration = generation;
     unsubscribeSnapshot?.();
     unsubscribeSnapshot = undefined;
-    if (!user?.uid) return;
+    if (!user?.uid || user.isAnonymous) return;
 
     const uid = user.uid;
     unsubscribeSnapshot = onSnapshot(

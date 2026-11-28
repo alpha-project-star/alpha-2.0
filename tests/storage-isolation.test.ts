@@ -5,6 +5,9 @@ import {
   getLegacyStorageKeys,
   importLegacyStorageForCurrentUser,
   setStoreUser,
+  enqueueCloudDelete,
+  getQueuedCloudDeletes,
+  clearQueuedCloudDelete,
 } from "../src/lib/alpha-store";
 import { LocalReminderRepository, type FirestoreReminder } from "../src/lib/reminder-repo";
 import { LocalAcknowledgementRepository } from "../src/lib/notification-acknowledgement";
@@ -137,6 +140,25 @@ describe("UID-scoped local persistence", () => {
 
     expect(reminderContextManager.getContext("account-A")?.id).toBe("reminder-context-a");
     expect(reminderContextManager.getContext("account-B")).toBeNull();
+  });
+
+  it("scopes reminder sync metadata and delete retries by UID", () => {
+    expect(getKey("alpha.reminderCloudIds.v1", "account-A"))
+      .not.toBe(getKey("alpha.reminderCloudIds.v1", "account-B"));
+    expect(getKey("alpha.reminderCloudDeletes.v1", "account-A"))
+      .not.toBe(getKey("alpha.reminderCloudDeletes.v1", "account-B"));
+
+    // Legacy unscoped metadata is retained but not assigned to either account.
+    values.set("alpha.reminderCloudIds.v1", JSON.stringify(["legacy-id"]));
+    expect(getLegacyStorageKeys()).not.toContain("alpha.reminderCloudIds.v1");
+    expect(importLegacyStorageForCurrentUser().imported).not.toContain("alpha.reminderCloudIds.v1");
+    enqueueCloudDelete("account-A", "notes", "note-a");
+    expect(getQueuedCloudDeletes("account-A")).toEqual([{ collectionName: "notes", id: "note-a" }]);
+    expect(getQueuedCloudDeletes("account-B")).toEqual([]);
+    expect(values.get("alpha.reminderCloudIds.v1")).toContain("legacy-id");
+
+    clearQueuedCloudDelete("account-A", "notes", "note-a");
+    expect(getQueuedCloudDeletes("account-A")).toEqual([]);
   });
 
   it("isolates reminders by UID instead of projecting another user's records", async () => {

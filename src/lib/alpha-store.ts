@@ -352,6 +352,9 @@ export const ALPHA_USER_KEY_PREFIXES: readonly string[] = [
   "alpha.reminders.v1",
   "alpha.deliveries.v1",
   "alpha.cloudSync.v1",
+  "alpha.cloudDeletes.v1",
+  "alpha.reminderCloudIds.v1",
+  "alpha.reminderCloudDeletes.v1",
   "alpha.nextSeq.v1",
   "alpha.chat_session",
   "alpha.internal_session",
@@ -406,7 +409,7 @@ export function setStoreUser(uid: string | null) {
 function collectLegacyStorageKeys(storage: Storage): string[] {
   const keys = new Set<string>();
   for (const prefix of ALPHA_USER_KEY_PREFIXES) {
-    if (prefix === "alpha.cloudSync.v1") continue;
+    if (["alpha.cloudSync.v1", "alpha.reminderCloudIds.v1", "alpha.reminderCloudDeletes.v1", "alpha.cloudDeletes.v1"].includes(prefix)) continue;
     const value = storage.getItem(prefix);
     if (value !== null && value.trim() !== "") keys.add(prefix);
   }
@@ -734,10 +737,50 @@ function upsert<T extends { id: string }>(list: T[], item: T): T[] {
   return i >= 0 ? list.map((x) => (x.id === item.id ? item : x)) : [item, ...list];
 }
 
+export type CloudDeleteCollection = "memories" | "notes" | "tasks" | "bills" | "goals";
+export interface CloudDeleteRequest { collectionName: CloudDeleteCollection; id: string; }
+const CLOUD_DELETE_QUEUE_KEY = "alpha.cloudDeletes.v1";
+
+export function getQueuedCloudDeletes(uid: string): CloudDeleteRequest[] {
+  const raw = getStorage()?.getItem(getKey(CLOUD_DELETE_QUEUE_KEY, uid));
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is CloudDeleteRequest =>
+      !!item && typeof item === "object" &&
+      ["memories", "notes", "tasks", "bills", "goals"].includes((item as CloudDeleteRequest).collectionName) &&
+      typeof (item as CloudDeleteRequest).id === "string" && !!(item as CloudDeleteRequest).id,
+    );
+  } catch { return []; }
+}
+
+export function enqueueCloudDelete(uid: string, collectionName: CloudDeleteCollection, id: string): void {
+  if (!uid || !id) return;
+  const queue = getQueuedCloudDeletes(uid);
+  if (!queue.some((item) => item.collectionName === collectionName && item.id === id)) {
+    queue.push({ collectionName, id });
+    getStorage()?.setItem(getKey(CLOUD_DELETE_QUEUE_KEY, uid), JSON.stringify(queue));
+  }
+}
+
+export function clearQueuedCloudDelete(uid: string, collectionName: CloudDeleteCollection, id: string): void {
+  if (!uid || !id) return;
+  const key = getKey(CLOUD_DELETE_QUEUE_KEY, uid);
+  const queue = getQueuedCloudDeletes(uid).filter((item) =>
+    item.collectionName !== collectionName || item.id !== id,
+  );
+  if (queue.length) getStorage()?.setItem(key, JSON.stringify(queue));
+  else getStorage()?.removeItem(key);
+}
+
+
 function queueCloudUpsert(
   collectionName: "memories" | "notes" | "tasks" | "bills" | "goals",
   item: { id: string },
 ): void {
+  const user = auth.currentUser;
+  if (user && !user.isAnonymous && currentStoreUid === user.uid) clearQueuedCloudDelete(user.uid, collectionName, item.id);
   void import("./cloud-sync")
     .then(({ syncDocToCloud }) => syncDocToCloud(collectionName, item.id, item))
     .catch((error) => console.warn("[CloudSync] Could not queue local upsert:", error));
@@ -747,6 +790,9 @@ function queueCloudDelete(
   collectionName: "memories" | "notes" | "tasks" | "bills" | "goals",
   id: string,
 ): void {
+  const user = auth.currentUser;
+  if (!user || user.isAnonymous || currentStoreUid !== user.uid) return;
+  enqueueCloudDelete(user.uid, collectionName, id);
   void import("./cloud-sync")
     .then(({ deleteDocFromCloud }) => deleteDocFromCloud(collectionName, id))
     .catch((error) => console.warn("[CloudSync] Could not queue local delete:", error));

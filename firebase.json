@@ -1,7 +1,10 @@
 {
-  "firestore": {
-    "rules": "firestore.rules"
-  },
+  "firestore": [
+    {
+      "database": "ai-studio-cosmicalphachat-5b971025-2342-45e9-bb06-0599a1fef015",
+      "rules": "firestore.rules"
+    }
+  ],
   "emulators": {
     "auth": {
       "host": "127.0.0.1",

@@ -7,7 +7,7 @@
 import { doc, setDoc, deleteDoc, onSnapshot, collection, getDocs, writeBatch } from "firebase/firestore";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { db, auth, handleFirestoreError, OperationType } from "./firebase";
-import { alphaStore, getStorage, getKey, getCurrentStoreUser, setStoreUser } from "./alpha-store";
+import { alphaStore, getStorage, getKey, getCurrentStoreUser, setStoreUser, getQueuedCloudDeletes, clearQueuedCloudDelete, enqueueCloudDelete } from "./alpha-store";
 
 let activeUnsubscribers: Array<() => void> = [];
 let currentSyncedUid: string | null = null;
@@ -72,7 +72,7 @@ export async function syncDocToCloud(
   data: any
 ): Promise<boolean> {
   const user = auth.currentUser;
-  if (!user || !user.uid || !id || getCurrentStoreUser() !== user.uid ||
+  if (!user || user.isAnonymous || !user.uid || !id || getCurrentStoreUser() !== user.uid ||
       pausedCloudSyncUids.has(user.uid)) return false;
 
   const uid = user.uid;
@@ -129,19 +129,28 @@ export async function deleteDocFromCloud(
   id: string
 ): Promise<boolean> {
   const user = auth.currentUser;
-  if (!user || !user.uid || !id || getCurrentStoreUser() !== user.uid ||
+  if (!user || user.isAnonymous || !user.uid || !id || getCurrentStoreUser() !== user.uid ||
       pausedCloudSyncUids.has(user.uid)) return false;
 
   const uid = user.uid;
+  enqueueCloudDelete(uid, collectionName, id);
   const path = `users/${uid}/${collectionName}/${id}`;
   try {
     await deleteDoc(doc(db, "users", uid, collectionName, id));
     unmarkKnownRemoteId(uid, collectionName, id);
+    clearQueuedCloudDelete(uid, collectionName, id);
     return true;
   } catch (err: any) {
     console.warn(`[CloudSync] Background delete from ${path} failed:`, err?.message || err);
     return false;
   }
+}
+
+async function retryQueuedCloudDeletes(uid: string): Promise<void> {
+  if (!uid || auth.currentUser?.uid !== uid || auth.currentUser.isAnonymous ||
+      getCurrentStoreUser() !== uid) return;
+  const pending = getQueuedCloudDeletes(uid);
+  await Promise.all(pending.map((item) => deleteDocFromCloud(item.collectionName, item.id)));
 }
 
 
@@ -159,7 +168,7 @@ export function resumeCloudSyncForAccount(uid: string): void {
 
 export async function wipeAccountCloudData(uid: string): Promise<void> {
   const user = auth.currentUser;
-  if (!uid || !user || user.uid !== uid || getCurrentStoreUser() !== uid) {
+  if (!uid || !user || user.isAnonymous || user.uid !== uid || getCurrentStoreUser() !== uid) {
     throw new Error("Cloud wipe refused: the active account does not match the requested UID.");
   }
 
@@ -192,6 +201,10 @@ export async function wipeAccountCloudData(uid: string): Promise<void> {
 export function initCloudSync(): () => void {
   if (typeof window === "undefined") return () => {};
 
+  const retryOnOnline = () => {
+    if (currentSyncedUid) void retryQueuedCloudDeletes(currentSyncedUid);
+  };
+  window.addEventListener("online", retryOnOnline);
   const unsubscribeAuth = onAuthStateChanged(auth, (user: User | null) => {
     setStoreUser(user?.uid ?? null);
     activeUnsubscribers.forEach((unsubscribe) => {
@@ -199,13 +212,14 @@ export function initCloudSync(): () => void {
     });
     activeUnsubscribers = [];
 
-    if (!user?.uid) {
+    if (!user?.uid || user.isAnonymous) {
       currentSyncedUid = null;
       return;
     }
 
     const uid = user.uid;
     currentSyncedUid = uid;
+    void retryQueuedCloudDeletes(uid);
 
     const collections: Array<{ name: SyncCollection; stateKey: SyncStateKey }> = [
       { name: "memories", stateKey: "memories" },
@@ -238,7 +252,10 @@ export function initCloudSync(): () => void {
 
             // A locally present ID previously known to exist remotely but now
             // absent from the server has been deleted elsewhere. Do not resurrect it.
+            const queuedDeletes = getQueuedCloudDeletes(uid).filter((item) => item.collectionName === entry.name);
+            const queuedDeleteIds = new Set(queuedDeletes.map((item) => item.id));
             for (const localItem of localItems) {
+              if (queuedDeleteIds.has(localItem.id)) continue;
               if (cloudById.has(localItem.id)) continue;
               if (knownIds.has(localItem.id)) continue;
               mergedById.set(localItem.id, localItem);
@@ -260,6 +277,10 @@ export function initCloudSync(): () => void {
             };
 
             for (const cloudItem of cloudItems) {
+              if (queuedDeleteIds.has(cloudItem.id)) {
+                void deleteDocFromCloud(entry.name, cloudItem.id);
+                continue;
+              }
               const localItem = localItems.find((item) => item.id === cloudItem.id);
               if (localItem && syncTimestamp(localItem) > syncTimestamp(cloudItem)) {
                 mergedById.set(localItem.id, localItem);
@@ -269,6 +290,10 @@ export function initCloudSync(): () => void {
               } else {
                 mergedById.set(cloudItem.id, cloudItem);
               }
+            }
+
+            for (const queuedId of queuedDeleteIds) {
+              if (!cloudById.has(queuedId)) clearQueuedCloudDelete(uid, entry.name, queuedId);
             }
 
             const merged = Array.from(mergedById.values());
@@ -293,6 +318,7 @@ export function initCloudSync(): () => void {
 
   return () => {
     unsubscribeAuth();
+    window.removeEventListener("online", retryOnOnline);
     activeUnsubscribers.forEach((unsubscribe) => {
       try { unsubscribe(); } catch {}
     });

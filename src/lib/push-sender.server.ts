@@ -389,6 +389,67 @@ async function claimPushDelivery(
  * Firestore access and VAPID credentials in server environment variables.
  * It never generates AI content or sends reminder notes; push copy is minimal.
  */
+export async function fetchDueReminderQueryRows(
+  baseUrl: string,
+  token: string,
+  now: number,
+): Promise<Array<{ document?: FirestoreDocument }>> {
+const queryRows: Array<{ document?: FirestoreDocument }> = [];
+let cursor: { dueAt: Record<string, unknown>; documentName: string } | undefined;
+const seenCursors = new Set<string>();
+while (true) {
+  const structuredQuery: Record<string, unknown> = {
+    from: [{ collectionId: "reminders", allDescendants: true }],
+    where: {
+      fieldFilter: {
+        field: { fieldPath: "dueAt" },
+        op: "LESS_THAN_OR_EQUAL",
+        value: { integerValue: String(Math.floor(now)) },
+      },
+    },
+    orderBy: [
+      { field: { fieldPath: "dueAt" }, direction: "ASCENDING" },
+      { field: { fieldPath: "__name__" }, direction: "ASCENDING" },
+    ],
+    limit: 500,
+    ...(cursor ? {
+      startAt: {
+        values: [cursor.dueAt, { referenceValue: cursor.documentName }],
+        before: false,
+      },
+    } : {}),
+  };
+  const queryResponse = await fetch(`${baseUrl}:runQuery`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ structuredQuery }),
+  });
+  if (!queryResponse.ok) {
+    throw new Error("Firestore due-reminder query failed with status " + queryResponse.status);
+  }
+
+  const page = await queryResponse.json() as Array<{ document?: FirestoreDocument }>;
+  queryRows.push(...page);
+  if (page.length < 500) break;
+  const lastDocument = page[page.length - 1]?.document;
+  const dueAt = lastDocument?.fields?.dueAt as Record<string, unknown> | undefined;
+  if (!lastDocument?.name || !dueAt) {
+    throw new Error("Firestore due-reminder query returned a full page without a usable cursor");
+  }
+  const cursorKey = `${lastDocument.name}:${JSON.stringify(dueAt)}`;
+  if (seenCursors.has(cursorKey)) {
+    throw new Error("Firestore due-reminder pagination did not advance");
+  }
+  seenCursors.add(cursorKey);
+  cursor = { dueAt, documentName: lastDocument.name };
+}
+
+return queryRows;
+}
+ 
 export async function processDuePushReminders(now = Date.now()): Promise<{
   scanned: number;
   attempted: number;
@@ -402,32 +463,7 @@ export async function processDuePushReminders(now = Date.now()): Promise<{
   const account = getFirebaseServiceAccount();
   const token = await getGoogleAccessToken(account);
   const baseUrl = firestoreBaseUrl(account);
-  const queryResponse = await fetch(`${baseUrl}:runQuery`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      structuredQuery: {
-        from: [{ collectionId: "reminders", allDescendants: true }],
-        where: {
-          fieldFilter: {
-            field: { fieldPath: "dueAt" },
-            op: "LESS_THAN_OR_EQUAL",
-            value: { integerValue: String(Math.floor(now)) },
-          },
-        },
-        orderBy: [{ field: { fieldPath: "dueAt" }, direction: "ASCENDING" }],
-        limit: 500,
-      },
-    }),
-  });
-  if (!queryResponse.ok) {
-    throw new Error("Firestore due-reminder query failed with status " + queryResponse.status);
-  }
-
-  const queryRows = await queryResponse.json() as Array<{ document?: FirestoreDocument }>;
+  const queryRows = await fetchDueReminderQueryRows(baseUrl, token, now);
   const due: Array<{ userId: string; reminderId: string; eventId: string; title: string }> = [];
   for (const row of queryRows) {
     const document = row.document;
