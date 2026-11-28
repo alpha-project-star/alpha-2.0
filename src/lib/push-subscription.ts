@@ -172,7 +172,7 @@ export async function unregisterPushSubscription(authenticatedUserId: string): P
         console.warn('[Push] Could not remove account subscription during sign-out:', error);
       }
       await sub.unsubscribe();
-      if (cloudCleanupFailed) return { success: false, error: 'Local push was disabled, but the account's cloud subscription record could not be removed.' };
+      if (cloudCleanupFailed) return { success: false, error: "Local push was disabled, but the account's cloud subscription record could not be removed." };
     }
     return { success: true };
   } catch (err: any) {
