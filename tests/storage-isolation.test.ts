@@ -150,6 +150,8 @@ describe("UID-scoped local persistence", () => {
 
     // Legacy unscoped metadata is retained but not assigned to either account.
     values.set("alpha.reminderCloudIds.v1", JSON.stringify(["legacy-id"]));
+    expect(getLegacyStorageKeys()).not.toContain("alpha.reminderCloudIds.v1");
+    expect(importLegacyStorageForCurrentUser().imported).not.toContain("alpha.reminderCloudIds.v1");
     enqueueCloudDelete("account-A", "notes", "note-a");
     expect(getQueuedCloudDeletes("account-A")).toEqual([{ collectionName: "notes", id: "note-a" }]);
     expect(getQueuedCloudDeletes("account-B")).toEqual([]);
