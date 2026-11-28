@@ -129,7 +129,7 @@ export async function deleteDocFromCloud(
   id: string
 ): Promise<boolean> {
   const user = auth.currentUser;
-  if (!user || !user.uid || !id || getCurrentStoreUser() !== user.uid ||
+  if (!user || user.isAnonymous || !user.uid || !id || getCurrentStoreUser() !== user.uid ||
       pausedCloudSyncUids.has(user.uid)) return false;
 
   const uid = user.uid;
