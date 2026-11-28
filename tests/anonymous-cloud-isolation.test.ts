@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { authMock, setDocMock, deleteDocMock, onSnapshotMock, collectionMock, docMock, storeUser } = vi.hoisted(() => ({
+const { authMock, setDocMock, deleteDocMock, onSnapshotMock, collectionMock, docMock, storeUser, queuedDeletes, cloudState } = vi.hoisted(() => ({
   authMock: { currentUser: null as null | { uid: string; isAnonymous: boolean } },
   setDocMock: vi.fn(),
   deleteDocMock: vi.fn(),
@@ -8,6 +8,8 @@ const { authMock, setDocMock, deleteDocMock, onSnapshotMock, collectionMock, doc
   collectionMock: vi.fn(),
   docMock: vi.fn(),
   storeUser: { value: "anonymous-user" },
+  queuedDeletes: [] as Array<{ collectionName: string; id: string }>,
+  cloudState: { records: { memories: [] as unknown[]; notes: [] as unknown[]; tasks: [] as unknown[]; bills: [] as unknown[]; goals: [] as unknown[] }, replaceAll: vi.fn() },
 }));
 
 vi.mock("firebase/auth", () => ({
@@ -27,7 +29,10 @@ vi.mock("firebase/firestore", () => ({
 }));
 vi.mock("../src/lib/firebase", () => ({ auth: authMock, db: {}, handleFirestoreError: vi.fn(), OperationType: {} }));
 vi.mock("../src/lib/alpha-store", () => ({
-  alphaStore: { get: () => ({ memories: [], notes: [], tasks: [], bills: [], goals: [] }) },
+  alphaStore: { get: () => cloudState.records, replaceAll: (...args: unknown[]) => cloudState.replaceAll(...args) },
+  getQueuedCloudDeletes: () => [...queuedDeletes],
+  clearQueuedCloudDelete: vi.fn(),
+  enqueueCloudDelete: vi.fn(),
   getStorage: () => undefined,
   getKey: (key: string) => key,
   getCurrentStoreUser: () => storeUser.value,
@@ -62,6 +67,34 @@ describe("anonymous cloud isolation", () => {
 
     expect(setDocMock).not.toHaveBeenCalled();
     expect(deleteDocMock).not.toHaveBeenCalled();
+  });
+
+  it("does not restore a cloud record while its local delete is queued", async () => {
+    authMock.currentUser = { uid: "google-user", isAnonymous: false };
+    storeUser.value = "google-user";
+    queuedDeletes.splice(0, queuedDeletes.length, { collectionName: "notes", id: "deleted-note" });
+    cloudState.records.notes = [];
+    const callbacks: Array<(snapshot: unknown) => void> = [];
+    collectionMock.mockImplementation((...parts: unknown[]) => parts.at(-1));
+    onSnapshotMock.mockImplementation((_ref: unknown, callback: (snapshot: unknown) => void) => {
+      callbacks.push(callback);
+      return vi.fn();
+    });
+    vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+
+    const stop = initCloudSync();
+    const notesCallbackIndex = callbacks.findIndex((_callback, index) =>
+      collectionMock.mock.results[index]?.value === "notes",
+    );
+    expect(notesCallbackIndex).toBeGreaterThanOrEqual(0);
+    callbacks[notesCallbackIndex]({
+      metadata: { fromCache: false },
+      docs: [{ id: "deleted-note", data: () => ({ id: "deleted-note", userId: "google-user", title: "Old copy" }) }],
+    });
+
+    await vi.waitFor(() => expect(deleteDocMock).toHaveBeenCalled());
+    expect(cloudState.replaceAll).not.toHaveBeenCalled();
+    stop();
   });
 
   it("does not subscribe anonymous users to cloud collections", () => {
