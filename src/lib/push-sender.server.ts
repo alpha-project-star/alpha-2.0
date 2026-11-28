@@ -447,6 +447,7 @@ while (true) {
   cursor = { dueAt, documentName: lastDocument.name };
 }
 
+return queryRows;
 }
  
 export async function processDuePushReminders(now = Date.now()): Promise<{
