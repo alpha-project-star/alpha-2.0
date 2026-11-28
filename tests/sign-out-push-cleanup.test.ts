@@ -1,12 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const calls: string[] = [];
-const authMock = { currentUser: null as null | { uid: string; isAnonymous: boolean } };
-const signOutMock = vi.fn(async () => { calls.push("signOut"); });
-const unregisterMock = vi.fn(async () => {
-  calls.push("unregister");
-  return { success: true };
-});
+const { calls, authMock, signOutMock, unregisterMock } = vi.hoisted(() => ({
+  calls: [] as string[],
+  authMock: { currentUser: null as null | { uid: string; isAnonymous: boolean } },
+  signOutMock: vi.fn(async () => {}),
+  unregisterMock: vi.fn(async () => ({ success: true })),
+}));
 
 vi.mock("firebase/auth", () => ({
   onAuthStateChanged: vi.fn(),
