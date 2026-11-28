@@ -1,7 +1,7 @@
 // src/lib/push-subscription.ts
 
 import { doc, setDoc, getDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
-import { db } from './firebase';
+import { auth, db } from './firebase';
 
 export interface PushSubscriptionRecord {
   subscriptionId: string;
@@ -73,7 +73,7 @@ export async function registerPushSubscription(
   authenticatedUserId: string,
   vapidPublicKey: string
 ): Promise<PushSubscriptionResult> {
-  if (!authenticatedUserId || !authenticatedUserId.trim()) {
+  if (!authenticatedUserId || !authenticatedUserId.trim() || auth.currentUser?.isAnonymous || auth.currentUser?.uid !== authenticatedUserId.trim()) {
     return {
       success: false,
       error: { code: 'UNAUTHENTICATED', message: 'Authenticated user ID is required for push subscription' },
@@ -155,7 +155,7 @@ export async function registerPushSubscription(
 }
 
 export async function unregisterPushSubscription(authenticatedUserId: string): Promise<{ success: boolean; error?: string }> {
-  if (!authenticatedUserId || !authenticatedUserId.trim()) {
+  if (!authenticatedUserId || !authenticatedUserId.trim() || auth.currentUser?.isAnonymous || auth.currentUser?.uid !== authenticatedUserId.trim()) {
     return { success: false, error: 'Unauthenticated' };
   }
   const userId = authenticatedUserId.trim();
@@ -165,10 +165,14 @@ export async function unregisterPushSubscription(authenticatedUserId: string): P
     if (sub) {
       const endpoint = sub.endpoint;
       const subscriptionId = btoa(endpoint).replace(/[/+=]/g, '_').substring(0, 64);
-      await sub.unsubscribe();
-
       const subRef = doc(db, 'users', userId, 'pushSubscriptions', subscriptionId);
-      await deleteDoc(subRef).catch(() => {});
+      let cloudCleanupFailed = false;
+      try { await deleteDoc(subRef); } catch (error) {
+        cloudCleanupFailed = true;
+        console.warn('[Push] Could not remove account subscription during sign-out:', error);
+      }
+      await sub.unsubscribe();
+      if (cloudCleanupFailed) return { success: false, error: 'Local push was disabled, but cloud cleanup will retry when the account reconnects.' };
     }
     return { success: true };
   } catch (err: any) {
