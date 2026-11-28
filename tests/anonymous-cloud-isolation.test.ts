@@ -67,7 +67,7 @@ describe("anonymous cloud isolation", () => {
   it("does not subscribe anonymous users to cloud collections", () => {
     authMock.currentUser = { uid: "anonymous-user", isAnonymous: true };
     storeUser.value = "anonymous-user";
-    vi.stubGlobal("window", {});
+    vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
 
     const stopMain = initCloudSync();
     const stopReminders = initReminderCloudSync({} as never);
