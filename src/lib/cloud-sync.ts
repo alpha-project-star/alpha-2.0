@@ -72,7 +72,7 @@ export async function syncDocToCloud(
   data: any
 ): Promise<boolean> {
   const user = auth.currentUser;
-  if (!user || !user.uid || !id || getCurrentStoreUser() !== user.uid ||
+  if (!user || user.isAnonymous || !user.uid || !id || getCurrentStoreUser() !== user.uid ||
       pausedCloudSyncUids.has(user.uid)) return false;
 
   const uid = user.uid;
@@ -199,7 +199,7 @@ export function initCloudSync(): () => void {
     });
     activeUnsubscribers = [];
 
-    if (!user?.uid) {
+    if (!user?.uid || user.isAnonymous) {
       currentSyncedUid = null;
       return;
     }
