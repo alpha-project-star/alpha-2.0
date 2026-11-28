@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { authMock, setDocMock, deleteDocMock, onSnapshotMock, collectionMock, docMock, storeUser, queuedDeletes, cloudState } = vi.hoisted(() => ({
+const { authMock, setDocMock, deleteDocMock, onSnapshotMock, collectionMock, docMock, storeUser, queuedDeletes, cloudState, enqueueDeleteMock, clearDeleteMock } = vi.hoisted(() => ({
   authMock: { currentUser: null as null | { uid: string; isAnonymous: boolean } },
   setDocMock: vi.fn(),
   deleteDocMock: vi.fn(),
@@ -10,6 +10,8 @@ const { authMock, setDocMock, deleteDocMock, onSnapshotMock, collectionMock, doc
   storeUser: { value: "anonymous-user" },
   queuedDeletes: [] as Array<{ collectionName: string; id: string }>,
   cloudState: { records: { memories: [] as unknown[], notes: [] as unknown[], tasks: [] as unknown[], bills: [] as unknown[], goals: [] as unknown[] }, replaceAll: vi.fn() },
+  enqueueDeleteMock: vi.fn(),
+  clearDeleteMock: vi.fn(),
 }));
 
 vi.mock("firebase/auth", () => ({
@@ -31,8 +33,8 @@ vi.mock("../src/lib/firebase", () => ({ auth: authMock, db: {}, handleFirestoreE
 vi.mock("../src/lib/alpha-store", () => ({
   alphaStore: { get: () => cloudState.records, replaceAll: (...args: unknown[]) => cloudState.replaceAll(...args) },
   getQueuedCloudDeletes: () => [...queuedDeletes],
-  clearQueuedCloudDelete: vi.fn(),
-  enqueueCloudDelete: vi.fn(),
+  clearQueuedCloudDelete: (...args: unknown[]) => clearDeleteMock(...args),
+  enqueueCloudDelete: (...args: unknown[]) => enqueueDeleteMock(...args),
   getStorage: () => undefined,
   getKey: (key: string) => key,
   getCurrentStoreUser: () => storeUser.value,
@@ -95,6 +97,16 @@ describe("anonymous cloud isolation", () => {
     await vi.waitFor(() => expect(deleteDocMock).toHaveBeenCalled());
     expect(cloudState.replaceAll).not.toHaveBeenCalled();
     stop();
+  });
+
+  it("keeps a failed cloud delete queued for a later retry", async () => {
+    authMock.currentUser = { uid: "google-user", isAnonymous: false };
+    storeUser.value = "google-user";
+    deleteDocMock.mockRejectedValueOnce(new Error("offline"));
+
+    expect(await deleteDocFromCloud("notes", "note-1")).toBe(false);
+    expect(enqueueDeleteMock).toHaveBeenCalledWith("google-user", "notes", "note-1");
+    expect(clearDeleteMock).not.toHaveBeenCalled();
   });
 
   it("does not subscribe anonymous users to cloud collections", () => {
