@@ -1,5 +1,12 @@
+import { readFileSync } from "node:fs";
+
 const projectId = "demo-alpha-firestore-rules";
-const firestoreBase = `http://127.0.0.1:8080/v1/projects/${projectId}/databases/(default)/documents`;
+const firebaseConfig = JSON.parse(readFileSync(new URL("../firebase-applet-config.json", import.meta.url), "utf8"));
+const databaseId = firebaseConfig.firestoreDatabaseId;
+if (typeof databaseId !== "string" || !databaseId.trim()) {
+  throw new Error("firebase-applet-config.json must define firestoreDatabaseId");
+}
+const firestoreBase = `http://127.0.0.1:8080/v1/projects/${projectId}/databases/${encodeURIComponent(databaseId)}/documents`;
 const authBase = "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1";
 
 function encodeValue(value) {
